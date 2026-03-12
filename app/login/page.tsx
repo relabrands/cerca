@@ -1,54 +1,81 @@
-"use client"
+"use client";
 
-import { useState } from "react"
-import { useRouter } from "next/navigation"
-import { Eye, EyeOff, Lock, Mail, Stethoscope } from "lucide-react"
-import { findCredential, patients } from "@/lib/store"
-import { Button } from "@/components/ui/button"
-import { Card, CardContent } from "@/components/ui/card"
-import Link from "next/link"
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { Eye, EyeOff, Lock, Mail, UserCircle } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import { auth, db } from "@/lib/firebase";
+import { signInWithEmailAndPassword } from "firebase/auth";
+import { doc, getDoc } from "firebase/firestore";
 
-export default function PatientLoginPage() {
-  const router = useRouter()
-  const [email, setEmail] = useState("")
-  const [password, setPassword] = useState("")
-  const [showPassword, setShowPassword] = useState(false)
-  const [error, setError] = useState("")
-  const [loading, setLoading] = useState(false)
+export default function UnifiedLoginPage() {
+  const router = useRouter();
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
 
-  function handleSubmit(e: React.FormEvent) {
-    e.preventDefault()
-    setError("")
-    setLoading(true)
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setError("");
+    setLoading(true);
 
-    // Simulate async auth
-    setTimeout(() => {
-      const cred = findCredential(email, password)
-      if (!cred || cred.role !== "patient") {
-        setError("Correo o contraseña incorrectos.")
-        setLoading(false)
-        return
+    try {
+      const userCredential = await signInWithEmailAndPassword(auth, email, password);
+      const user = userCredential.user;
+
+      // Fetch user role from Firestore
+      const userDocRef = doc(db, "users", user.uid);
+      const userDoc = await getDoc(userDocRef);
+
+      if (!userDoc.exists()) {
+        setError("Usuario autenticado, pero no se encontró su perfil (rol). Contacta a soporte.");
+        await auth.signOut();
+        setLoading(false);
+        return;
       }
-      // In production: store session token from Firebase Auth
-      // For demo: just navigate
-      router.push("/")
-      setLoading(false)
-    }, 600)
-  }
 
-  // Demo hint: first patient credential
-  const demoPatient = patients[0]
+      const userData = userDoc.data();
+      const role = userData?.role;
+
+      if (role === "admin") {
+        router.push("/admin");
+      } else if (role === "doctor") {
+        router.push("/doctor");
+      } else if (role === "paciente" || role === "patient") {
+        router.push("/");
+      } else {
+        setError(`Rol desconocido (${role}). Contacta a soporte.`);
+        await auth.signOut();
+      }
+    } catch (err: any) {
+      console.error(err);
+      if (err.code === "auth/invalid-credential" || err.code === "auth/user-not-found" || err.code === "auth/wrong-password") {
+        setError("Correo electrónico o contraseña incorrectos.");
+      } else {
+        setError("Hubo un error al iniciar sesión. Intenta de nuevo.");
+      }
+    } finally {
+      if (error === "") {
+        // Only set loading to false if there was an error, 
+        // otherwise let the router transition happen seamlessly
+        setLoading(false);
+      }
+    }
+  }
 
   return (
     <main className="min-h-screen bg-background flex flex-col items-center justify-center px-4 py-12">
       <div className="w-full max-w-sm space-y-6">
-        {/* Logo / brand */}
+        {/* Brand */}
         <div className="text-center space-y-2">
           <div className="inline-flex items-center justify-center h-14 w-14 rounded-2xl bg-primary/10 mx-auto">
-            <Stethoscope className="h-7 w-7 text-primary" />
+            <UserCircle className="h-7 w-7 text-primary" />
           </div>
           <h1 className="text-2xl font-bold text-foreground">Saciety Hub</h1>
-          <p className="text-sm text-muted-foreground">Acceso para pacientes</p>
+          <p className="text-sm text-muted-foreground">Acceso al portal</p>
         </div>
 
         <Card className="border-0 shadow-lg">
@@ -110,39 +137,17 @@ export default function PatientLoginPage() {
               )}
 
               <Button type="submit" className="w-full" disabled={loading}>
-                {loading ? "Ingresando..." : "Ingresar"}
+                {loading ? "Ingresando..." : "Iniciar sesión"}
               </Button>
             </form>
 
-            {/* Forgot password */}
-            <p className="text-center text-xs text-muted-foreground">
+            <p className="text-center text-xs text-muted-foreground pt-2">
               ¿Olvidaste tu contraseña?{" "}
-              <span className="text-primary underline cursor-pointer">Contáctanos</span>
+              <span className="text-primary underline cursor-pointer hover:text-primary/80">Recuperar acceso</span>
             </p>
           </CardContent>
         </Card>
-
-        {/* Demo hint */}
-        <div className="rounded-xl border border-border bg-muted/50 p-4 space-y-1">
-          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Demo rápido</p>
-          <button
-            type="button"
-            onClick={() => { setEmail(demoPatient.email); setPassword("paciente123") }}
-            className="text-sm text-primary underline text-left"
-          >
-            {demoPatient.name} — {demoPatient.email}
-          </button>
-          <p className="text-xs text-muted-foreground">Contraseña: <span className="font-mono">paciente123</span></p>
-        </div>
-
-        {/* Back to role selector */}
-        <p className="text-center text-xs text-muted-foreground">
-          ¿Eres médico o administrador?{" "}
-          <Link href="/select-role" className="text-primary underline">
-            Cambiar acceso
-          </Link>
-        </p>
       </div>
     </main>
-  )
+  );
 }

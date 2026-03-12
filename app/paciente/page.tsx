@@ -1,8 +1,8 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { onAuthStateChanged } from "firebase/auth"
-import { doc, getDoc, collection, query, where, getDocs } from "firebase/firestore"
+import { doc, getDoc, setDoc, collection, query, where, getDocs } from "firebase/firestore"
 import { auth, db } from "@/lib/firebase"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -15,14 +15,19 @@ import { getDaysSinceProcedure, getPatientPhase, type Patient } from "@/lib/stor
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute"
 import { Target } from "lucide-react"
 
+const todayKey = () => new Date().toISOString().slice(0, 10) // "2026-03-12"
+
 function PatientContent() {
   const [patient, setPatient] = useState<Patient | null>(null)
   const [loadingData, setLoadingData] = useState(true)
   const [error, setError] = useState("")
 
-  // Progress state
-  const [hydration, setHydration] = useState({ current: 1200, goal: 2000 })
-  const [protein, setProtein] = useState({ current: 45, goal: 60 })
+  // Progress state — loaded from Firestore
+  const [hydration, setHydration] = useState({ current: 0, goal: 2000 })
+  const [protein, setProtein] = useState({ current: 0, goal: 60 })
+
+  // AI prediction
+  const [prediction, setPrediction] = useState<string | null>(null)
 
   // Water modal state
   const [showWaterModal, setShowWaterModal] = useState(false)
@@ -34,41 +39,69 @@ function PatientContent() {
   const [foodDescription, setFoodDescription] = useState("")
   const [foodLogged, setFoodLogged] = useState(false)
   const [estimatedProtein, setEstimatedProtein] = useState<number | null>(null)
+  const [estimatingProtein, setEstimatingProtein] = useState(false)
 
+  // Track the live patient for firestore writes
+  const patientRef = useRef<Patient | null>(null)
+
+  // ─── Load patient + today's log ───────────────────────────────────────────
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
-      if (!user) {
-        setLoadingData(false)
-        return
-      }
+      if (!user) { setLoadingData(false); return }
       try {
-        // 1. Try loading patient via entityId in user profile
+        let fetchedPatient: Patient | null = null
+
         const userDoc = await getDoc(doc(db, "users", user.uid))
-        const userData = userDoc.exists() ? userDoc.data() : null
-        const entityId = userData?.entityId
+        const entityId = userDoc.exists() ? userDoc.data().entityId : null
 
         if (entityId) {
           const patientDoc = await getDoc(doc(db, "patients", entityId))
-          if (patientDoc.exists()) {
-            setPatient({ id: patientDoc.id, ...patientDoc.data() } as Patient)
-            setLoadingData(false)
-            return
-          }
+          if (patientDoc.exists()) fetchedPatient = { id: patientDoc.id, ...patientDoc.data() } as Patient
         }
 
-        // 2. Fallback: find patient record by email
-        if (user.email) {
+        if (!fetchedPatient && user.email) {
           const q = query(collection(db, "patients"), where("email", "==", user.email))
           const snap = await getDocs(q)
-          if (!snap.empty) {
-            const patientDoc = snap.docs[0]
-            setPatient({ id: patientDoc.id, ...patientDoc.data() } as Patient)
-            setLoadingData(false)
-            return
-          }
+          if (!snap.empty) fetchedPatient = { id: snap.docs[0].id, ...snap.docs[0].data() } as Patient
         }
 
-        setError("No se encontraron tus datos de paciente. Pide a tu médico que los registre.")
+        if (!fetchedPatient) {
+          setError("No se encontraron tus datos de paciente.")
+          return
+        }
+
+        setPatient(fetchedPatient)
+        patientRef.current = fetchedPatient
+
+        // Load today's daily log from Firestore
+        const logRef = doc(db, "patients", fetchedPatient.id, "dailyLogs", todayKey())
+        const logSnap = await getDoc(logRef)
+        if (logSnap.exists()) {
+          const data = logSnap.data()
+          setHydration(h => ({ ...h, current: data.hydration_ml ?? 0 }))
+          setProtein(p => ({ ...p, current: data.protein_g ?? 0 }))
+        }
+
+        // Fetch AI prediction in background
+        const currentDay = getDaysSinceProcedure(fetchedPatient.procedureDate)
+        const { phase } = getPatientPhase(currentDay)
+        fetch("/api/ai/predict", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            phase,
+            weightStart: fetchedPatient.weightStart,
+            weightCurrent: fetchedPatient.weightCurrent,
+            allergies: [
+              ...(fetchedPatient.allergiesFoods || []),
+              ...(fetchedPatient.allergiesMedications || []),
+            ],
+          }),
+        })
+          .then(r => r.json())
+          .then(data => { if (data.prediction) setPrediction(data.prediction) })
+          .catch(() => {})
+
       } catch (err: any) {
         setError(`Error cargando datos: ${err.message}`)
       } finally {
@@ -78,30 +111,48 @@ function PatientContent() {
     return () => unsubscribe()
   }, [])
 
-  const handleRegisterWater = () => {
-    const ml = parseInt(waterAmount)
-    if (!isNaN(ml) && ml > 0) {
-      setHydration((prev) => ({ ...prev, current: Math.min(prev.current + ml, prev.goal) }))
-      setWaterAmount("")
-      setShowWaterModal(false)
-    }
+  // ─── Persist daily log to Firestore ───────────────────────────────────────
+  const persistLog = async (newHydration: number, newProtein: number) => {
+    const p = patientRef.current
+    if (!p) return
+    const logRef = doc(db, "patients", p.id, "dailyLogs", todayKey())
+    await setDoc(logRef, { hydration_ml: newHydration, protein_g: newProtein, updatedAt: new Date().toISOString() }, { merge: true })
   }
 
-  const handleRegisterFood = () => {
+  // ─── Water registration ────────────────────────────────────────────────────
+  const handleRegisterWater = async () => {
+    const ml = parseInt(waterAmount)
+    if (isNaN(ml) || ml <= 0) return
+    const next = Math.min(hydration.current + ml, hydration.goal)
+    setHydration(prev => ({ ...prev, current: next }))
+    setWaterAmount("")
+    setShowWaterModal(false)
+    await persistLog(next, protein.current)
+  }
+
+  // ─── Food / protein registration ──────────────────────────────────────────
+  const handleRegisterFood = async () => {
     if (foodDescription.trim().length === 0) return
-    const words = foodDescription.toLowerCase()
-    let ep = 5
-    if (words.includes("pollo") || words.includes("pechuga")) ep = 28
-    else if (words.includes("huevo")) ep = 12
-    else if (words.includes("atun") || words.includes("atún")) ep = 22
-    else if (words.includes("proteína") || words.includes("proteina")) ep = 25
-    else if (words.includes("leche") || words.includes("yogurt")) ep = 8
-    else if (words.includes("frijol") || words.includes("lenteja")) ep = 10
-    else if (words.includes("salmón") || words.includes("salmon")) ep = 25
-    else if (words.includes("res") || words.includes("carne")) ep = 26
+    setEstimatingProtein(true)
+
+    let ep = 5 // fallback
+    try {
+      const res = await fetch("/api/ai/estimate-protein", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ foodDescription }),
+      })
+      const data = await res.json()
+      if (typeof data.protein === "number") ep = data.protein
+    } catch (_) { /* use fallback */ }
+
+    setEstimatingProtein(false)
     setEstimatedProtein(ep)
-    setProtein((prev) => ({ ...prev, current: Math.min(prev.current + ep, prev.goal) }))
+    const next = Math.min(protein.current + ep, protein.goal)
+    setProtein(prev => ({ ...prev, current: next }))
     setFoodLogged(true)
+    await persistLog(hydration.current, next)
+
     setTimeout(() => {
       setFoodLogged(false)
       setFoodDescription("")
@@ -282,26 +333,14 @@ function PatientContent() {
                 </CardTitle>
               </CardHeader>
               <CardContent className="pt-0">
-                <p className="text-sm text-muted-foreground leading-relaxed">
-                  {phaseNumber === 1
-                    ? "Es normal sentir náuseas leves o pesadez en los primeros días."
-                    : phaseNumber === 2
-                    ? "Tu cuerpo empieza a adaptarse. Introduce purés suaves de forma gradual."
-                    : phaseNumber === 3
-                    ? "Puedes agregar alimentos blandos. Mastica muy bien antes de tragar."
-                    : "Mantén porciones pequeñas y come despacio para una mejor tolerancia."}
-                </p>
-                <div className="mt-3 rounded-lg bg-primary/5 p-3">
-                  <p className="text-sm font-medium text-primary">
-                    {phaseNumber === 1
-                      ? "Tip: Bebe sorbos pequeños de agua fría cada 15 minutos."
-                      : phaseNumber === 2
-                      ? "Tip: Prueba el caldo de pollo con proteína en polvo sin sabor."
-                      : phaseNumber === 3
-                      ? "Tip: Incorpora un nuevo alimento a la vez para detectar tolerancias."
-                      : "Tip: Apunta todo lo que comes para identificar patrones de saciedad."}
-                  </p>
-                </div>
+                {prediction ? (
+                  <p className="text-sm text-muted-foreground leading-relaxed">{prediction}</p>
+                ) : (
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    <span>Generando consejo personalizado...</span>
+                  </div>
+                )}
               </CardContent>
             </Card>
 
@@ -475,9 +514,14 @@ function PatientContent() {
             <Button
               className="mt-4 w-full"
               onClick={handleRegisterFood}
-              disabled={foodDescription.trim().length === 0 || foodLogged}
+              disabled={foodDescription.trim().length === 0 || foodLogged || estimatingProtein}
             >
-              {foodLogged ? (
+              {estimatingProtein ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Analizando con IA...
+                </>
+              ) : foodLogged ? (
                 <>
                   <Check className="mr-2 h-4 w-4" />
                   Proteína estimada y registrada

@@ -161,20 +161,33 @@ export default function NutricionPage() {
   }
 
   const handleGenerateRecipe = async () => {
-    if (!selectedType) return
+    if (!selectedType || !patient) return
     setShowTypeModal(false)
     setIsGenerating(true)
 
-    // Placeholder for Vertex AI integration
-    // The prompt would include userAllergies so the model avoids those foods/ingredients
-    // const prompt = `Genera una receta ${selectedType} para fase 1 de balón gástrico.
-    //   Alergias alimentarias: ${userAllergies.foods.join(", ")}.
-    //   Medicamentos a evitar: ${userAllergies.medications.join(", ")}.`
-    // const result = await generativeModel.generateContent(prompt)
+    const currentDay = getDaysSinceProcedure(patient.procedureDate)
+    const { phase: phaseNumber } = getPatientPhase(currentDay)
 
-    await new Promise((resolve) => setTimeout(resolve, 2000))
-    setGeneratedRecipe(aiRecipes[selectedType])
-    setIsGenerating(false)
+    try {
+      const res = await fetch("/api/ai/recipe", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type: selectedType,
+          phase: phaseNumber,
+          allergiesFoods: patient.allergiesFoods || [],
+          allergiesMedications: patient.allergiesMedications || [],
+        }),
+      })
+      const data = await res.json()
+      if (data.recipe) {
+        setGeneratedRecipe({ ...data.recipe, id: 999, type: selectedType })
+      }
+    } catch (err) {
+      console.error("Error generando receta:", err)
+    } finally {
+      setIsGenerating(false)
+    }
   }
 
   if (loadingData) {

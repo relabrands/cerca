@@ -55,6 +55,20 @@ service cloud.firestore {
         (request.resource != null && request.resource.data.email == request.auth.token.email)
       );
       allow write: if isPatient() && resource.data.email == request.auth.token.email;
+
+      // dailyLogs subcollection: patient can read/write their own logs
+      match /dailyLogs/{logId} {
+        allow read, write: if isAdmin() || isDoctor();
+        allow read, write: if isPatient();
+      }
+    }
+
+    // ----------- alerts collection -----------
+    // Written by the backend API (admin SDK bypasses these rules),
+    // but doctors can read their alerts
+    match /alerts/{alertId} {
+      allow read: if isAdmin() || isDoctor();
+      allow write: if isAdmin();
     }
   }
 }

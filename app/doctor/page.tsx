@@ -244,10 +244,20 @@ function DoctorContent() {
 
   // ── Patient detail view ────────────────────────────────────────────────────
   if (selectedPatient) {
-    const day = getDaysSinceProcedure(selectedPatient.procedureDate)
-    const phase = getPatientPhase(day)
+    const actualDay = getDaysSinceProcedure(selectedPatient.procedureDate)
+    const done = actualDay >= selectedPatient.balloonDurationDays
+    const displayDay = done ? selectedPatient.balloonDurationDays : actualDay
+    const phase = getPatientPhase(displayDay)
     const pct = getWeightLostPercent(selectedPatient.weightStart, selectedPatient.weightCurrent, selectedPatient.weightGoal)
     const lost = selectedPatient.weightStart - selectedPatient.weightCurrent
+
+    // Completion date = procedureDate + balloonDurationDays
+    const completionDate = (() => {
+      if (!selectedPatient.procedureDate) return ""
+      const d = new Date(selectedPatient.procedureDate + "T00:00:00")
+      d.setDate(d.getDate() + selectedPatient.balloonDurationDays)
+      return d.toLocaleDateString("es-DO", { day: "numeric", month: "long", year: "numeric" })
+    })()
 
     return (
       <main className="min-h-screen bg-background pb-24">
@@ -270,15 +280,13 @@ function DoctorContent() {
                   <p className="text-sm text-sidebar-foreground/70">{selectedPatient.email}</p>
                 </div>
               </div>
-              <Button
-                size="sm"
-                variant="outline"
-                className="border-sidebar-foreground/30 text-sidebar-foreground hover:bg-sidebar-accent"
+              <button
                 onClick={() => openEditModal(selectedPatient)}
+                className="flex items-center gap-1.5 rounded-xl bg-white/15 hover:bg-white/25 transition-colors px-3 py-1.5 text-sm font-medium text-sidebar-foreground"
               >
-                <Edit2 className="h-4 w-4 mr-1" />
+                <Edit2 className="h-4 w-4" />
                 Editar
-              </Button>
+              </button>
             </div>
           </div>
         </header>
@@ -292,10 +300,17 @@ function DoctorContent() {
                   <p className="text-xs text-muted-foreground font-medium flex items-center gap-1">
                     <Clock className="h-3 w-3" /> Progreso del tratamiento
                   </p>
-                  <p className="text-4xl font-bold text-foreground mt-1">
-                    Día {day}{" "}
-                    <span className="text-base font-normal text-muted-foreground">de {selectedPatient.balloonDurationDays}</span>
-                  </p>
+                  {done ? (
+                    <>
+                      <p className="text-3xl font-bold text-foreground mt-1">¡Completado!</p>
+                      <p className="text-sm text-muted-foreground mt-0.5">{completionDate}</p>
+                    </>
+                  ) : (
+                    <p className="text-4xl font-bold text-foreground mt-1">
+                      Día {displayDay}{" "}
+                      <span className="text-base font-normal text-muted-foreground">de {selectedPatient.balloonDurationDays}</span>
+                    </p>
+                  )}
                   <span className="mt-1 inline-block rounded-full bg-primary/10 px-3 py-0.5 text-xs font-medium text-primary">
                     {selectedPatient.balloonType}
                   </span>
@@ -303,12 +318,12 @@ function DoctorContent() {
                 <div className="h-20 w-20">
                   <svg viewBox="0 0 36 36" className="h-full w-full -rotate-90">
                     <path d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="currentColor" strokeWidth="3" className="text-muted" />
-                    <path d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeDasharray={`${Math.min((day / selectedPatient.balloonDurationDays) * 100, 100)}, 100`} className="text-primary" />
+                    <path d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeDasharray={`${Math.min((displayDay / selectedPatient.balloonDurationDays) * 100, 100)}, 100`} className={done ? "text-green-500" : "text-primary"} />
                   </svg>
                 </div>
               </div>
               <div className="mt-3 rounded-lg bg-muted px-3 py-2 text-xs text-muted-foreground">
-                Fase {phase.phase}: <span className="font-medium text-foreground">{phase.label}</span>
+                {done ? "Tratamiento finalizado" : <>Fase {phase.phase}: <span className="font-medium text-foreground">{phase.label}</span></>}
               </div>
             </CardContent>
           </Card>
@@ -523,10 +538,13 @@ function DoctorContent() {
               <Users className="h-6 w-6 text-sidebar-primary" />
               <h1 className="text-xl font-bold text-sidebar-foreground">Mis Pacientes</h1>
             </div>
-            <Button size="sm" variant="outline" className="border-sidebar-foreground/30 text-sidebar-foreground hover:bg-sidebar-accent" onClick={() => setShowAddModal(true)}>
-              <Plus className="h-4 w-4 mr-1" />
+            <button
+              className="flex items-center gap-1.5 rounded-xl bg-white/15 hover:bg-white/25 transition-colors px-3 py-1.5 text-sm font-medium text-sidebar-foreground"
+              onClick={() => setShowAddModal(true)}
+            >
+              <Plus className="h-4 w-4" />
               Agregar
-            </Button>
+            </button>
           </div>
           <p className="text-sm text-sidebar-foreground/70 mt-1">{patientList.length} paciente{patientList.length !== 1 ? "s" : ""} registrado{patientList.length !== 1 ? "s" : ""}</p>
         </div>
@@ -750,7 +768,7 @@ function PatientFormModal({
   handleBalloonSelect: (bt: { type: BalloonType; days: number }) => void
   showWeightCurrent?: boolean
 }) {
-  const isValid = form.name.trim() && form.email.trim() && form.procedureDate && form.balloonType && form.weightStart && form.weightGoal
+  const isValid = form.name.trim() && form.email.trim() && form.procedureDate && form.weightStart && form.weightGoal
 
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 backdrop-blur-sm">

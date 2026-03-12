@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
-import { ai } from "@/lib/gemini";
+import { getAI } from "@/lib/gemini";
 import { Type, Schema } from "@google/genai";
 
 export async function POST(req: Request) {
   try {
+    const ai = getAI();
     const { type, phase, allergiesFoods, allergiesMedications } = await req.json();
 
     const allowedPhase = parseInt(phase) || 1;

@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
-import { ai } from "@/lib/gemini";
+import { getAI } from "@/lib/gemini";
 
 export async function POST(req: Request) {
   try {
+    const ai = getAI();
     const { phase, weightStart, weightCurrent, allergies } = await req.json();
 
     const prompt = `Eres un coach nutricional experto ayudando a un paciente que se ha colocado un balón gástrico.

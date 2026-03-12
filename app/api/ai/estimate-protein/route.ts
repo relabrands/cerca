@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server";
-import { ai } from "@/lib/gemini";
+import { getAI } from "@/lib/gemini";
 
 export async function POST(req: Request) {
   try {
+    const ai = getAI();
     const { foodDescription } = await req.json();
 
     if (!foodDescription || typeof foodDescription !== "string") {

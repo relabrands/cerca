@@ -26,9 +26,13 @@ export default function UnifiedLoginPage() {
       const userCredential = await signInWithEmailAndPassword(auth, email, password);
       const user = userCredential.user;
 
-      // Fetch user role from Firestore
+      // Fetch user role from Firestore with a timeout to prevent infinite loading
       const userDocRef = doc(db, "users", user.uid);
-      const userDoc = await getDoc(userDocRef);
+      
+      const userDoc = (await Promise.race([
+        getDoc(userDocRef),
+        new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout de conexión a Firebase. ¿Está activada la base de datos Firestore?")), 6000))
+      ])) as import("firebase/firestore").DocumentSnapshot;
 
       if (!userDoc.exists()) {
         setError("Usuario autenticado, pero no se encontró su perfil (rol). Contacta a soporte.");

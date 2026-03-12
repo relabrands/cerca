@@ -28,13 +28,16 @@ export default function SetupPage() {
       const userCredential = await createUserWithEmailAndPassword(auth, email, password);
       const user = userCredential.user;
 
-      // Save role and data in Firestore
-      await setDoc(doc(db, "users", user.uid), {
-        email: user.email,
-        name: name,
-        role: role,
-        createdAt: new Date()
-      });
+      // Save role and data in Firestore with a timeout to prevent infinite loading
+      await Promise.race([
+        setDoc(doc(db, "users", user.uid), {
+          email: user.email,
+          name: name,
+          role: role,
+          createdAt: new Date()
+        }),
+        new Promise((_, reject) => setTimeout(() => reject(new Error("Timeout: Firestore no responde. Confirma que la base de datos está creada en la consola de Firebase.")), 6000))
+      ]);
 
       setMessage({ type: "success", text: `Usuario ${role} creado exitosamente!` });
       
@@ -45,7 +48,11 @@ export default function SetupPage() {
       
     } catch (error: any) {
       console.error(error);
-      setMessage({ type: "error", text: `Error: ${error.message}` });
+      if (error.code === 'auth/email-already-in-use') {
+        setMessage({ type: "error", text: "Este correo electrónico ya está registrado." });
+      } else {
+        setMessage({ type: "error", text: `Error: ${error.message}` });
+      }
     } finally {
       setLoading(false);
     }

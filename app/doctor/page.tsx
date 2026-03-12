@@ -214,6 +214,16 @@ function DoctorContent() {
   const handleAddPatient = async () => {
     if (!isFormValid || !doctor) return
     setSavingPatient(true)
+
+    // Auto-agregar alergias si el doctor olvidó presionar Enter o '+'
+    const finalMedAllergies = form.newMedAllergy.trim() && !form.allergiesMedications.includes(form.newMedAllergy.trim())
+      ? [...form.allergiesMedications, form.newMedAllergy.trim()] 
+      : form.allergiesMedications;
+
+    const finalFoodAllergies = form.newFoodAllergy.trim() && !form.allergiesFoods.includes(form.newFoodAllergy.trim())
+      ? [...form.allergiesFoods, form.newFoodAllergy.trim()] 
+      : form.allergiesFoods;
+
     try {
       const response = await fetch("/api/create-user", {
         method: "POST",
@@ -233,8 +243,8 @@ function DoctorContent() {
           weightCurrent: lbsToKg(parseFloat(form.weightStart) || 0),
           doctorId: doctor.id,
           clinicId: doctor.clinicId,
-          allergiesMedications: form.allergiesMedications,
-          allergiesFoods: form.allergiesFoods,
+          allergiesMedications: finalMedAllergies,
+          allergiesFoods: finalFoodAllergies,
         }),
       })
 
@@ -258,8 +268,8 @@ function DoctorContent() {
         weightCurrent: lbsToKg(parseFloat(form.weightStart) || 0),
         doctorId: doctor.id,
         clinicId: doctor.clinicId,
-        allergiesMedications: form.allergiesMedications,
-        allergiesFoods: form.allergiesFoods,
+        allergiesMedications: finalMedAllergies,
+        allergiesFoods: finalFoodAllergies,
       }
 
       setPatientList(prev => [...prev, newPatient])
@@ -298,6 +308,15 @@ function DoctorContent() {
   const handleEditPatient = async () => {
     if (!editingPatient) return
     setSavingEdit(true)
+
+    const finalMedAllergies = editForm.newMedAllergy.trim() && !editForm.allergiesMedications.includes(editForm.newMedAllergy.trim())
+      ? [...editForm.allergiesMedications, editForm.newMedAllergy.trim()] 
+      : editForm.allergiesMedications;
+
+    const finalFoodAllergies = editForm.newFoodAllergy.trim() && !editForm.allergiesFoods.includes(editForm.newFoodAllergy.trim())
+      ? [...editForm.allergiesFoods, editForm.newFoodAllergy.trim()] 
+      : editForm.allergiesFoods;
+
     try {
       const updates = {
         name: editForm.name.trim(), email: editForm.email.trim(), phone: editForm.phone.trim(),
@@ -306,8 +325,8 @@ function DoctorContent() {
         weightStart: lbsToKg(parseFloat(editForm.weightStart) || 0),
         weightGoal: lbsToKg(parseFloat(editForm.weightGoal) || 0),
         weightCurrent: lbsToKg(parseFloat(editForm.weightCurrent || editForm.weightStart) || 0),
-        allergiesMedications: editForm.allergiesMedications,
-        allergiesFoods: editForm.allergiesFoods,
+        allergiesMedications: finalMedAllergies,
+        allergiesFoods: finalFoodAllergies,
         updatedAt: new Date(),
       }
       await updateDoc(doc(db, "patients", editingPatient.id), updates)

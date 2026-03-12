@@ -6,10 +6,10 @@ import { usePathname } from "next/navigation"
 import { cn } from "@/lib/utils"
 
 const navItems = [
-  { href: "/", icon: Home, label: "Inicio" },
-  { href: "/nutricion", icon: Utensils, label: "Nutrición" },
-  { href: "/progreso", icon: TrendingUp, label: "Progreso" },
-  { href: "/perfil", icon: User, label: "Perfil" },
+  { href: "/paciente", icon: Home, label: "Inicio" },
+  { href: "/paciente/nutricion", icon: Utensils, label: "Nutrición" },
+  { href: "/paciente/progreso", icon: TrendingUp, label: "Progreso" },
+  { href: "/paciente/perfil", icon: User, label: "Perfil" },
 ]
 
 export function BottomNav() {

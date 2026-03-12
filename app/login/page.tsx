@@ -45,7 +45,7 @@ export default function UnifiedLoginPage() {
       } else if (role === "doctor") {
         router.push("/doctor");
       } else if (role === "paciente" || role === "patient") {
-        router.push("/");
+        router.push("/paciente");
       } else {
         setError(`Rol desconocido (${role}). Contacta a soporte.`);
         await auth.signOut();

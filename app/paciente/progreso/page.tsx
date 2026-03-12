@@ -1,6 +1,7 @@
 "use client"
 
 import { useState } from "react"
+import { ProtectedRoute } from "@/components/auth/ProtectedRoute"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { BottomNav } from "@/components/bottom-nav"
@@ -67,7 +68,8 @@ export default function ProgresoPage() {
   }
 
   return (
-    <main className="min-h-screen bg-background pb-24">
+    <ProtectedRoute allowedRoles={["paciente", "patient"]}>
+      <main className="min-h-screen bg-background pb-24">
       {/* Header */}
       <header className="bg-sidebar px-4 pb-8 pt-12">
         <div className="mx-auto max-w-lg">
@@ -268,6 +270,7 @@ export default function ProgresoPage() {
 
       <PanicButton />
       <BottomNav />
-    </main>
+      </main>
+    </ProtectedRoute>
   )
 }

@@ -33,6 +33,7 @@ import {
   Clock,
   Stethoscope,
 } from "lucide-react"
+import { ProtectedRoute } from "@/components/auth/ProtectedRoute"
 
 // Active doctor (in production comes from Firebase Auth session)
 const ACTIVE_DOCTOR_ID = "dr-1"
@@ -61,6 +62,14 @@ const emptyForm = {
 }
 
 export default function DoctorDashboard() {
+  return (
+    <ProtectedRoute allowedRoles={["doctor"]}>
+      <DoctorContent />
+    </ProtectedRoute>
+  )
+}
+
+function DoctorContent() {
   const doctor = doctors.find((d) => d.id === ACTIVE_DOCTOR_ID)!
   const [patientList, setPatientList] = useState<Patient[]>(getPatientsForDoctor(ACTIVE_DOCTOR_ID))
   const [selectedPatient, setSelectedPatient] = useState<Patient | null>(null)

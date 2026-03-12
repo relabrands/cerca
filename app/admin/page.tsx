@@ -26,10 +26,19 @@ import {
   User,
   Target,
 } from "lucide-react"
+import { ProtectedRoute } from "@/components/auth/ProtectedRoute"
 
 type View = "overview" | "clinic" | "doctor"
 
 export default function SuperAdminDashboard() {
+  return (
+    <ProtectedRoute allowedRoles={["admin"]}>
+      <SuperAdminContent />
+    </ProtectedRoute>
+  )
+}
+
+function SuperAdminContent() {
   const [view, setView] = useState<View>("overview")
   const [selectedClinic, setSelectedClinic] = useState<Clinic | null>(null)
   const [selectedDoctor, setSelectedDoctor] = useState<Doctor | null>(null)

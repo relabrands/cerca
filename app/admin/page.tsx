@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from "react"
 import { collection, getDocs, addDoc, doc, setDoc, query, where, orderBy } from "firebase/firestore"
 import { initializeApp, getApps, deleteApp } from "firebase/app"
-import { getAuth, createUserWithEmailAndPassword } from "firebase/auth"
+import { getAuth } from "firebase/auth"
 import { db } from "@/lib/firebase"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -117,19 +117,28 @@ function SuperAdminContent() {
     setSaving(true)
     setSaveError("")
 
-    let secondaryApp: ReturnType<typeof initializeApp> | null = null
     try {
-      const secondaryName = `secondary-${Date.now()}`
-      secondaryApp = initializeApp(firebaseConfig, secondaryName)
-      const secondaryAuth = getAuth(secondaryApp)
+      const response = await fetch("/api/create-user", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          role: "doctor",
+          name: doctorForm.name,
+          email: doctorForm.email,
+          password: doctorForm.password,
+          phone: doctorForm.phone,
+          specialty: doctorForm.specialty,
+          clinicId: doctorForm.clinicId,
+        }),
+      })
 
-      // Create Firebase Auth account for doctor
-      const cred = await createUserWithEmailAndPassword(secondaryAuth, doctorForm.email, doctorForm.password)
-      const uid = cred.user.uid
-      await secondaryAuth.signOut()
+      const data = await response.json()
+      if (!response.ok) {
+        throw new Error(data.error || "Error creando doctor")
+      }
 
-      // Generate a stable entityId
-      const entityId = generateDoctorId()
+      // El backend ya lo guardó en Firestore con un entityId
+      const entityId = data.entityId
       const initials = doctorForm.name
         .split(" ")
         .filter((w) => w.length > 0)
@@ -137,28 +146,7 @@ function SuperAdminContent() {
         .slice(0, 2)
         .join("")
 
-      // Create user profile in Firestore
-      await setDoc(doc(db, "users", uid), {
-        email: doctorForm.email,
-        name: doctorForm.name,
-        role: "doctor",
-        entityId,
-        createdAt: new Date(),
-      })
-
-      // Create doctor record in Firestore
-      const newDoctor = {
-        id: entityId,
-        name: doctorForm.name,
-        specialty: doctorForm.specialty,
-        email: doctorForm.email,
-        phone: doctorForm.phone,
-        clinicId: doctorForm.clinicId,
-        avatarInitials: initials,
-        createdAt: new Date(),
-      }
-      await setDoc(doc(db, "doctors", entityId), newDoctor)
-
+      // Update local state
       setDoctors((prev) => [...prev, {
         id: entityId,
         name: doctorForm.name,
@@ -169,22 +157,17 @@ function SuperAdminContent() {
         avatarInitials: initials,
         patientIds: [],
       } as Doctor])
+
       setSaveSuccess(true)
       setTimeout(() => {
         setSaveSuccess(false)
         setShowAddDoctor(false)
         setDoctorForm(emptyDoctorForm)
       }, 1400)
+
     } catch (err: any) {
-      if (err.code === "auth/email-already-in-use") {
-        setSaveError("Este correo ya está registrado en Firebase Auth.")
-      } else {
-        setSaveError(err.message)
-      }
+      setSaveError(err.message)
     } finally {
-      if (secondaryApp) {
-        try { await deleteApp(secondaryApp) } catch (_) {}
-      }
       setSaving(false)
     }
   }

@@ -60,7 +60,7 @@ const BALLOON_TYPES: { type: BalloonType; days: number }[] = [
 ]
 
 const emptyForm = {
-  name: "", email: "", phone: "", dateOfBirth: "", procedureDate: "",
+  name: "", email: "", password: "", phone: "", dateOfBirth: "", procedureDate: "",
   balloonType: "", balloonDurationDays: 180,
   weightStart: "", weightGoal: "", weightCurrent: "",
   allergiesMedications: [] as string[], allergiesFoods: [] as string[],
@@ -209,25 +209,60 @@ function DoctorContent() {
   }
 
   // ── Add patient ───────────────────────────────────────────────────────────
-  const isFormValid = form.name.trim() && form.email.trim() && form.procedureDate && form.balloonType && form.weightStart && form.weightGoal
+  const isFormValid = form.name.trim() && form.email.trim() && form.password.length >= 6 && form.procedureDate && form.balloonType && form.weightStart && form.weightGoal
 
   const handleAddPatient = async () => {
     if (!isFormValid || !doctor) return
     setSavingPatient(true)
     try {
-      const data = {
-        name: form.name.trim(), email: form.email.trim(), phone: form.phone.trim(),
-        dateOfBirth: form.dateOfBirth, procedureDate: form.procedureDate,
-        balloonType: form.balloonType, balloonDurationDays: form.balloonDurationDays,
+      const response = await fetch("/api/create-user", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          role: "patient",
+          name: form.name.trim(),
+          email: form.email.trim(),
+          password: form.password,
+          phone: form.phone.trim(),
+          dateOfBirth: form.dateOfBirth,
+          procedureDate: form.procedureDate,
+          balloonType: form.balloonType,
+          balloonDurationDays: form.balloonDurationDays,
+          weightStart: lbsToKg(parseFloat(form.weightStart) || 0),
+          weightGoal: lbsToKg(parseFloat(form.weightGoal) || 0),
+          weightCurrent: lbsToKg(parseFloat(form.weightStart) || 0),
+          doctorId: doctor.id,
+          clinicId: doctor.clinicId,
+          allergiesMedications: form.allergiesMedications,
+          allergiesFoods: form.allergiesFoods,
+        }),
+      })
+
+      const responseData = await response.json()
+      if (!response.ok) {
+        throw new Error(responseData.error || "Error creando paciente")
+      }
+
+      // Backend created it successfully and returned entityId
+      const newPatient: Patient = {
+        id: responseData.entityId,
+        name: form.name.trim(),
+        email: form.email.trim(),
+        phone: form.phone.trim(),
+        dateOfBirth: form.dateOfBirth,
+        procedureDate: form.procedureDate,
+        balloonType: form.balloonType,
+        balloonDurationDays: form.balloonDurationDays,
         weightStart: lbsToKg(parseFloat(form.weightStart) || 0),
         weightGoal: lbsToKg(parseFloat(form.weightGoal) || 0),
         weightCurrent: lbsToKg(parseFloat(form.weightStart) || 0),
-        doctorId: doctor.id, clinicId: doctor.clinicId,
-        allergiesMedications: form.allergiesMedications, allergiesFoods: form.allergiesFoods,
-        createdAt: new Date(),
+        doctorId: doctor.id,
+        clinicId: doctor.clinicId,
+        allergiesMedications: form.allergiesMedications,
+        allergiesFoods: form.allergiesFoods,
       }
-      const ref = await addDoc(collection(db, "patients"), data)
-      setPatientList(prev => [...prev, { id: ref.id, ...data } as Patient])
+
+      setPatientList(prev => [...prev, newPatient])
       setAddSuccess(true)
       setTimeout(() => { setAddSuccess(false); setShowAddModal(false); setForm(emptyForm) }, 1400)
     } catch (err: any) {
@@ -243,6 +278,7 @@ function DoctorContent() {
     setEditForm({
       name: patient.name,
       email: patient.email,
+      password: "", // No es necesario editarla aquí inicialmente
       phone: patient.phone || "",
       dateOfBirth: patient.dateOfBirth || "",
       procedureDate: patient.procedureDate || "",
@@ -912,6 +948,13 @@ function PatientFormModal({
                 <label className="text-xs font-medium text-foreground mb-1 block">Correo electrónico *</label>
                 <Input type="email" placeholder="paciente@email.com" value={form.email} onChange={e => updateF("email", e.target.value)} />
               </div>
+              {form.password !== undefined && (
+                <div>
+                  <label className="text-xs font-medium text-foreground mb-1 block">Contraseña Temporal *</label>
+                  <Input type="text" placeholder="Mínimo 6 caracteres" value={form.password} onChange={e => updateF("password", e.target.value)} />
+                  <p className="text-[10px] text-muted-foreground mt-1">Se enviará por correo al paciente.</p>
+                </div>
+              )}
               <div>
                 <label className="text-xs font-medium text-foreground mb-1 block">Teléfono (RD)</label>
                 <Input

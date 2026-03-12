@@ -16,7 +16,7 @@ export interface Patient {
   phone: string
   dateOfBirth: string
   procedureDate: string // ISO date string "2024-03-01"
-  balloonType: BalloonType
+  balloonType: string // Originally BalloonType union, but now dynamic
   balloonDurationDays: number // e.g. 120, 180, 365
   weightStart: number // kg
   weightGoal: number // kg
@@ -36,6 +36,7 @@ export interface Doctor {
   clinicId: string
   patientIds: string[]
   avatarInitials: string
+  balloonTypes?: { id: string; name: string; durationDays: number }[]
 }
 
 export interface Clinic {

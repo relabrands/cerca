@@ -61,7 +61,7 @@ const BALLOON_TYPES: { type: BalloonType; days: number }[] = [
 
 const emptyForm = {
   name: "", email: "", phone: "", dateOfBirth: "", procedureDate: "",
-  balloonType: "" as BalloonType | "", balloonDurationDays: 180,
+  balloonType: "", balloonDurationDays: 180,
   weightStart: "", weightGoal: "", weightCurrent: "",
   allergiesMedications: [] as string[], allergiesFoods: [] as string[],
   newMedAllergy: "", newFoodAllergy: "",
@@ -78,6 +78,12 @@ function DoctorContent() {
 
   // Tab navigation
   const [tab, setTab] = useState<Tab>("inicio")
+
+  // Doctor balloons
+  const [doctorBalloons, setDoctorBalloons] = useState<{ id: string; name: string; durationDays: number }[]>([])
+  const [showBalloonModal, setShowBalloonModal] = useState(false)
+  const [editingBalloonId, setEditingBalloonId] = useState<string | null>(null)
+  const [balloonForm, setBalloonForm] = useState({ name: "", durationDays: "" })
 
   // Patient detail / list
   const [selectedPatient, setSelectedPatient] = useState<Patient | null>(null)
@@ -106,7 +112,14 @@ function DoctorContent() {
 
         const doctorDoc = await getDoc(doc(db, "doctors", entityId))
         if (!doctorDoc.exists()) { setError(`Doctor (${entityId}) no encontrado en Firestore.`); setLoadingData(false); return }
-        setDoctor({ id: doctorDoc.id, ...doctorDoc.data() } as Doctor)
+        const docData = { id: doctorDoc.id, ...doctorDoc.data() } as Doctor
+        setDoctor(docData)
+
+        if (docData.balloonTypes && docData.balloonTypes.length > 0) {
+          setDoctorBalloons(docData.balloonTypes)
+        } else {
+          setDoctorBalloons(BALLOON_TYPES.map((b, i) => ({ id: `default-${i}`, name: b.type, durationDays: b.days })))
+        }
 
         const patientsQ = query(collection(db, "patients"), where("doctorId", "==", entityId))
         const patientsSnap = await getDocs(patientsQ)
@@ -143,8 +156,57 @@ function DoctorContent() {
     setter(prev => ({ ...prev, [listKey]: (prev[listKey] as string[]).filter(a => a !== item) }))
   }
 
-  const handleBalloonSelect = (bt: { type: BalloonType; days: number }, setter: typeof setForm) =>
-    setter(prev => ({ ...prev, balloonType: bt.type, balloonDurationDays: bt.days }))
+  const handleBalloonSelect = (bt: { name: string; durationDays: number }, setter: typeof setForm) =>
+    setter(prev => ({ ...prev, balloonType: bt.name as BalloonType, balloonDurationDays: bt.durationDays }))
+
+  // ── Manage Balloons ────────────────────────────────────────────────────────
+  const handleSaveBalloon = async () => {
+    if (!doctor || !balloonForm.name.trim() || !balloonForm.durationDays.trim()) return
+    const durationObj = parseInt(balloonForm.durationDays)
+    if (isNaN(durationObj) || durationObj <= 0) return
+
+    try {
+      let newBalloons: typeof doctorBalloons
+      if (editingBalloonId) {
+        newBalloons = doctorBalloons.map(b => b.id === editingBalloonId ? { ...b, name: balloonForm.name, durationDays: durationObj } : b)
+      } else {
+        const newBalloon = { id: `b-${Date.now()}`, name: balloonForm.name, durationDays: durationObj }
+        newBalloons = [...doctorBalloons, newBalloon]
+      }
+      
+      await updateDoc(doc(db, "doctors", doctor.id), { balloonTypes: newBalloons })
+      setDoctorBalloons(newBalloons)
+      setShowBalloonModal(false)
+      setEditingBalloonId(null)
+      setBalloonForm({ name: "", durationDays: "" })
+    } catch (err: any) {
+      alert(`Error guardando balón: ${err.message}`)
+    }
+  }
+
+  const handleDeleteBalloon = async (id: string) => {
+    if (!doctor) return
+    if (!confirm("¿Seguro que deseas eliminar este tipo de balón?")) return
+    try {
+      const newBalloons = doctorBalloons.filter(b => b.id !== id)
+      await updateDoc(doc(db, "doctors", doctor.id), { balloonTypes: newBalloons })
+      setDoctorBalloons(newBalloons)
+    } catch (err: any) {
+      alert(`Error eliminando balón: ${err.message}`)
+    }
+  }
+
+  const openAddBalloonModal = () => {
+    setBalloonForm({ name: "", durationDays: "" })
+    setEditingBalloonId(null)
+    setShowBalloonModal(true)
+  }
+
+  const openEditBalloonModal = (b: { id: string, name: string, durationDays: number }) => {
+    setBalloonForm({ name: b.name, durationDays: String(b.durationDays) })
+    setEditingBalloonId(b.id)
+    setShowBalloonModal(true)
+  }
 
   // ── Add patient ───────────────────────────────────────────────────────────
   const isFormValid = form.name.trim() && form.email.trim() && form.procedureDate && form.balloonType && form.weightStart && form.weightGoal
@@ -156,7 +218,7 @@ function DoctorContent() {
       const data = {
         name: form.name.trim(), email: form.email.trim(), phone: form.phone.trim(),
         dateOfBirth: form.dateOfBirth, procedureDate: form.procedureDate,
-        balloonType: form.balloonType as BalloonType, balloonDurationDays: form.balloonDurationDays,
+        balloonType: form.balloonType, balloonDurationDays: form.balloonDurationDays,
         weightStart: lbsToKg(parseFloat(form.weightStart) || 0),
         weightGoal: lbsToKg(parseFloat(form.weightGoal) || 0),
         weightCurrent: lbsToKg(parseFloat(form.weightStart) || 0),
@@ -204,7 +266,7 @@ function DoctorContent() {
       const updates = {
         name: editForm.name.trim(), email: editForm.email.trim(), phone: editForm.phone.trim(),
         dateOfBirth: editForm.dateOfBirth, procedureDate: editForm.procedureDate,
-        balloonType: editForm.balloonType as BalloonType, balloonDurationDays: editForm.balloonDurationDays,
+        balloonType: editForm.balloonType, balloonDurationDays: editForm.balloonDurationDays,
         weightStart: lbsToKg(parseFloat(editForm.weightStart) || 0),
         weightGoal: lbsToKg(parseFloat(editForm.weightGoal) || 0),
         weightCurrent: lbsToKg(parseFloat(editForm.weightCurrent || editForm.weightStart) || 0),
@@ -438,6 +500,7 @@ function DoctorContent() {
             success={editSuccess}
             addAllergy={(type) => addAllergy(type, editForm, setEditForm)}
             removeAllergy={(type, item) => removeAllergy(type, item, editForm, setEditForm)}
+            doctorBalloons={doctorBalloons}
             handleBalloonSelect={(bt) => handleBalloonSelect(bt, setEditForm)}
             showWeightCurrent
           />
@@ -666,6 +729,37 @@ function DoctorContent() {
           </CardContent>
         </Card>
 
+        <Card className="border-0 shadow-md">
+          <CardHeader className="pb-2 flex flex-row items-center justify-between">
+            <CardTitle className="text-base font-semibold">Mis Tipos de Balón</CardTitle>
+            <Button size="sm" variant="outline" className="h-8 gap-1 text-xs" onClick={openAddBalloonModal}>
+              <Plus className="h-3.5 w-3.5" /> Agregar
+            </Button>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {doctorBalloons.length === 0 ? (
+              <p className="text-sm text-muted-foreground text-center py-4">No tienes balones configurados.</p>
+            ) : (
+              doctorBalloons.map(b => (
+                <div key={b.id} className="flex items-center justify-between p-3 rounded-lg border border-border bg-card">
+                  <div>
+                    <p className="text-sm font-semibold text-foreground">{b.name}</p>
+                    <p className="text-xs text-muted-foreground">{b.durationDays} días de tratamiento</p>
+                  </div>
+                  <div className="flex gap-1">
+                    <Button size="icon" variant="ghost" className="h-8 w-8 text-muted-foreground hover:text-foreground" onClick={() => openEditBalloonModal(b)}>
+                      <Edit2 className="h-4 w-4" />
+                    </Button>
+                    <Button size="icon" variant="ghost" className="h-8 w-8 text-destructive hover:bg-destructive/10 hover:text-destructive" onClick={() => handleDeleteBalloon(b.id)}>
+                      <X className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+              ))
+            )}
+          </CardContent>
+        </Card>
+
         <Button
           variant="outline"
           className="w-full text-destructive border-destructive/30 hover:bg-destructive/5"
@@ -698,6 +792,7 @@ function DoctorContent() {
           success={addSuccess}
           addAllergy={(type) => addAllergy(type, form, setForm)}
           removeAllergy={(type, item) => removeAllergy(type, item, form, setForm)}
+          doctorBalloons={doctorBalloons}
           handleBalloonSelect={(bt) => handleBalloonSelect(bt, setForm)}
         />
       )}
@@ -714,9 +809,33 @@ function DoctorContent() {
           success={editSuccess}
           addAllergy={(type) => addAllergy(type, editForm, setEditForm)}
           removeAllergy={(type, item) => removeAllergy(type, item, editForm, setEditForm)}
+          doctorBalloons={doctorBalloons}
           handleBalloonSelect={(bt) => handleBalloonSelect(bt, setEditForm)}
           showWeightCurrent
         />
+      )}
+
+      {/* Balloon Type Modal */}
+      {showBalloonModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+          <div className="w-full max-w-sm rounded-2xl bg-card shadow-2xl animate-in slide-in-from-bottom-4 p-6">
+            <h2 className="text-lg font-bold text-foreground mb-4">{editingBalloonId ? "Editar Balón" : "Agregar Balón"}</h2>
+            <div className="space-y-4">
+              <div>
+                <label className="text-xs font-medium text-foreground mb-1 block">Nombre del balón</label>
+                <Input placeholder="Ej: Orbera" value={balloonForm.name} onChange={e => setBalloonForm({ ...balloonForm, name: e.target.value })} />
+              </div>
+              <div>
+                <label className="text-xs font-medium text-foreground mb-1 block">Duración (días)</label>
+                <Input type="number" placeholder="Ej: 180" value={balloonForm.durationDays} onChange={e => setBalloonForm({ ...balloonForm, durationDays: e.target.value })} />
+              </div>
+              <div className="flex gap-2 justify-end pt-2">
+                <Button variant="ghost" onClick={() => setShowBalloonModal(false)}>Cancelar</Button>
+                <Button onClick={handleSaveBalloon} disabled={!balloonForm.name.trim() || !balloonForm.durationDays.trim()}>Guardar</Button>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
     </main>
   )
@@ -754,7 +873,7 @@ type FormType = typeof emptyForm
 
 function PatientFormModal({
   title, form, updateF, onClose, onSave, saving, success,
-  addAllergy, removeAllergy, handleBalloonSelect, showWeightCurrent,
+  addAllergy, removeAllergy, doctorBalloons, handleBalloonSelect, showWeightCurrent,
 }: {
   title: string
   form: FormType
@@ -765,7 +884,8 @@ function PatientFormModal({
   success: boolean
   addAllergy: (type: "med" | "food") => void
   removeAllergy: (type: "med" | "food", item: string) => void
-  handleBalloonSelect: (bt: { type: BalloonType; days: number }) => void
+  doctorBalloons: { id: string; name: string; durationDays: number }[]
+  handleBalloonSelect: (bt: { name: string; durationDays: number }) => void
   showWeightCurrent?: boolean
 }) {
   const isValid = form.name.trim() && form.email.trim() && form.procedureDate && form.weightStart && form.weightGoal
@@ -820,10 +940,10 @@ function PatientFormModal({
               <div>
                 <label className="text-xs font-medium text-foreground mb-2 block">Tipo de balón *</label>
                 <div className="grid grid-cols-2 gap-2">
-                  {BALLOON_TYPES.map(bt => (
-                    <button key={bt.type} onClick={() => handleBalloonSelect(bt)} className={`rounded-xl border-2 p-3 text-left transition-all ${form.balloonType === bt.type ? "border-primary bg-primary/5" : "border-border bg-muted/40 hover:border-primary/40"}`}>
-                      <p className={`text-xs font-semibold ${form.balloonType === bt.type ? "text-primary" : "text-foreground"}`}>{bt.type.split(" (")[0]}</p>
-                      <p className="text-xs text-muted-foreground mt-0.5">{bt.days} días</p>
+                  {doctorBalloons.map(bt => (
+                    <button key={bt.id} onClick={() => handleBalloonSelect(bt)} className={`rounded-xl border-2 p-3 text-left transition-all ${form.balloonType === bt.name ? "border-primary bg-primary/5" : "border-border bg-muted/40 hover:border-primary/40"}`}>
+                      <p className={`text-xs font-semibold ${form.balloonType === bt.name ? "text-primary" : "text-foreground"}`}>{bt.name}</p>
+                      <p className="text-xs text-muted-foreground mt-0.5">{bt.durationDays} días</p>
                     </button>
                   ))}
                 </div>

@@ -1,17 +1,9 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
+import { collection, getDocs } from "firebase/firestore"
+import { db } from "@/lib/firebase"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Badge } from "@/components/ui/badge"
-import {
-  clinics,
-  doctors,
-  patients,
-  getDaysSinceProcedure,
-  getDoctorsForClinic,
-  type Clinic,
-  type Doctor,
-} from "@/lib/store"
 import {
   Building2,
   Users,
@@ -24,31 +16,67 @@ import {
   TrendingDown,
   Shield,
   User,
-  Target,
+  Loader2,
 } from "lucide-react"
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute"
+import { getDaysSinceProcedure, type Clinic, type Doctor, type Patient } from "@/lib/store"
 
 type View = "overview" | "clinic" | "doctor"
 
-export default function SuperAdminDashboard() {
-  return (
-    <ProtectedRoute allowedRoles={["admin"]}>
-      <SuperAdminContent />
-    </ProtectedRoute>
-  )
-}
-
 function SuperAdminContent() {
+  const [clinics, setClinics] = useState<Clinic[]>([])
+  const [doctors, setDoctors] = useState<Doctor[]>([])
+  const [patients, setPatients] = useState<Patient[]>([])
+  const [loadingData, setLoadingData] = useState(true)
+  const [error, setError] = useState("")
+
   const [view, setView] = useState<View>("overview")
   const [selectedClinic, setSelectedClinic] = useState<Clinic | null>(null)
   const [selectedDoctor, setSelectedDoctor] = useState<Doctor | null>(null)
 
+  useEffect(() => {
+    async function loadData() {
+      try {
+        const [clinicsSnap, doctorsSnap, patientsSnap] = await Promise.all([
+          getDocs(collection(db, "clinics")),
+          getDocs(collection(db, "doctors")),
+          getDocs(collection(db, "patients")),
+        ])
+        setClinics(clinicsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Clinic)))
+        setDoctors(doctorsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Doctor)))
+        setPatients(patientsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Patient)))
+      } catch (err: any) {
+        setError(`Error cargando datos: ${err.message}`)
+      } finally {
+        setLoadingData(false)
+      }
+    }
+    loadData()
+  }, [])
+
+  const getDoctorsForClinic = (clinicId: string) => doctors.filter(d => d.clinicId === clinicId)
+
+  if (loadingData) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center gap-3 bg-background">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        <p className="text-sm text-muted-foreground">Cargando panel de administración...</p>
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center gap-3 bg-background px-6">
+        <p className="text-sm text-destructive text-center">{error}</p>
+      </div>
+    )
+  }
+
   const totalPatients = patients.length
   const totalDoctors = doctors.length
   const totalClinics = clinics.length
-  const activePatients = patients.filter(
-    (p) => getDaysSinceProcedure(p.procedureDate) < p.balloonDurationDays
-  ).length
+  const activePatients = patients.filter(p => getDaysSinceProcedure(p.procedureDate) < p.balloonDurationDays).length
 
   const balloonBreakdown = [
     "Orbera (6 meses)",
@@ -91,11 +119,7 @@ function SuperAdminContent() {
           <div className="grid grid-cols-2 gap-3">
             {[
               { label: "Pacientes totales", value: doctorPatients.length, icon: Users },
-              {
-                label: "Balones activos",
-                value: doctorPatients.filter((p) => getDaysSinceProcedure(p.procedureDate) < p.balloonDurationDays).length,
-                icon: Activity,
-              },
+              { label: "Balones activos", value: doctorPatients.filter(p => getDaysSinceProcedure(p.procedureDate) < p.balloonDurationDays).length, icon: Activity },
             ].map(({ label, value, icon: Icon }) => (
               <Card key={label} className="border-0 shadow-md">
                 <CardContent className="flex flex-col items-center justify-center p-4 gap-1">
@@ -153,10 +177,7 @@ function SuperAdminContent() {
                         </div>
                       </div>
                       <div className="h-1.5 rounded-full bg-muted overflow-hidden">
-                        <div
-                          className="h-full rounded-full bg-primary"
-                          style={{ width: `${Math.min((day / p.balloonDurationDays) * 100, 100)}%` }}
-                        />
+                        <div className="h-full rounded-full bg-primary" style={{ width: `${Math.min((day / p.balloonDurationDays) * 100, 100)}%` }} />
                       </div>
                     </CardContent>
                   </Card>
@@ -173,9 +194,7 @@ function SuperAdminContent() {
   if (view === "clinic" && selectedClinic) {
     const clinicDoctors = getDoctorsForClinic(selectedClinic.id)
     const clinicPatients = patients.filter((p) => p.clinicId === selectedClinic.id)
-    const activeCount = clinicPatients.filter(
-      (p) => getDaysSinceProcedure(p.procedureDate) < p.balloonDurationDays
-    ).length
+    const activeCount = clinicPatients.filter(p => getDaysSinceProcedure(p.procedureDate) < p.balloonDurationDays).length
 
     return (
       <main className="min-h-screen bg-background pb-10">
@@ -237,18 +256,12 @@ function SuperAdminContent() {
             </h2>
             <div className="space-y-3">
               {clinicDoctors.map((doc) => {
-                const docPatients = patients.filter((p) => p.doctorId === doc.id)
+                const docPatients = patients.filter(p => p.doctorId === doc.id)
                 return (
-                  <Card
-                    key={doc.id}
-                    className="border-0 shadow-md cursor-pointer transition-all hover:shadow-lg"
-                    onClick={() => { setSelectedDoctor(doc); setView("doctor") }}
-                  >
+                  <Card key={doc.id} className="border-0 shadow-md cursor-pointer transition-all hover:shadow-lg" onClick={() => { setSelectedDoctor(doc); setView("doctor") }}>
                     <CardContent className="p-4 flex items-center justify-between">
                       <div className="flex items-center gap-3">
-                        <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10 font-semibold text-sm text-primary">
-                          {doc.avatarInitials}
-                        </div>
+                        <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10 font-semibold text-sm text-primary">{doc.avatarInitials}</div>
                         <div>
                           <p className="font-semibold text-foreground text-sm">{doc.name}</p>
                           <p className="text-xs text-muted-foreground">{doc.specialty}</p>
@@ -313,127 +326,135 @@ function SuperAdminContent() {
         </div>
 
         {/* Balloon breakdown */}
-        <Card className="border-0 shadow-md">
-          <CardHeader className="pb-2">
-            <CardTitle className="flex items-center gap-2 text-base">
-              <TrendingDown className="h-5 w-5 text-primary" />
-              Distribución por Tipo de Balón
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            {balloonBreakdown.map(({ type, count }) => (
-              <div key={type}>
-                <div className="flex justify-between text-sm mb-1">
-                  <span className="font-medium text-foreground">{type}</span>
-                  <span className="text-muted-foreground">{count} pacientes</span>
+        {totalPatients > 0 && (
+          <Card className="border-0 shadow-md">
+            <CardHeader className="pb-2">
+              <CardTitle className="flex items-center gap-2 text-base">
+                <TrendingDown className="h-5 w-5 text-primary" />
+                Distribución por Tipo de Balón
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {balloonBreakdown.map(({ type, count }) => (
+                <div key={type}>
+                  <div className="flex justify-between text-sm mb-1">
+                    <span className="font-medium text-foreground">{type}</span>
+                    <span className="text-muted-foreground">{count} pacientes</span>
+                  </div>
+                  <div className="h-2 rounded-full bg-muted overflow-hidden">
+                    <div className="h-full rounded-full bg-primary transition-all" style={{ width: totalPatients > 0 ? `${(count / totalPatients) * 100}%` : "0%" }} />
+                  </div>
                 </div>
-                <div className="h-2 rounded-full bg-muted overflow-hidden">
-                  <div
-                    className="h-full rounded-full bg-primary transition-all"
-                    style={{ width: totalPatients > 0 ? `${(count / totalPatients) * 100}%` : "0%" }}
-                  />
-                </div>
-              </div>
-            ))}
-          </CardContent>
-        </Card>
+              ))}
+            </CardContent>
+          </Card>
+        )}
 
         {/* Clinics list */}
-        <div>
-          <h2 className="flex items-center gap-2 font-semibold text-foreground mb-3">
-            <Building2 className="h-5 w-5 text-primary" />
-            Clínicas
-          </h2>
-          <div className="space-y-3">
-            {clinics.map((clinic) => {
-              const clinicDoctors = getDoctorsForClinic(clinic.id)
-              const clinicPatients = patients.filter((p) => p.clinicId === clinic.id)
-              const active = clinicPatients.filter(
-                (p) => getDaysSinceProcedure(p.procedureDate) < p.balloonDurationDays
-              ).length
-              return (
-                <Card
-                  key={clinic.id}
-                  className="border-0 shadow-md cursor-pointer transition-all hover:shadow-lg active:scale-[0.99]"
-                  onClick={() => { setSelectedClinic(clinic); setView("clinic") }}
-                >
-                  <CardContent className="p-4">
-                    <div className="flex items-start justify-between mb-3">
-                      <div className="flex items-center gap-3">
-                        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary/10">
-                          <Building2 className="h-5 w-5 text-primary" />
-                        </div>
-                        <div>
-                          <p className="font-semibold text-foreground text-sm">{clinic.name}</p>
-                          <div className="flex items-center gap-1 text-xs text-muted-foreground mt-0.5">
-                            <MapPin className="h-3 w-3" />
-                            <span>{clinic.city}</span>
+        {clinics.length > 0 && (
+          <div>
+            <h2 className="flex items-center gap-2 font-semibold text-foreground mb-3">
+              <Building2 className="h-5 w-5 text-primary" />
+              Clínicas
+            </h2>
+            <div className="space-y-3">
+              {clinics.map((clinic) => {
+                const clinicDoctors = getDoctorsForClinic(clinic.id)
+                const clinicPatients = patients.filter(p => p.clinicId === clinic.id)
+                const active = clinicPatients.filter(p => getDaysSinceProcedure(p.procedureDate) < p.balloonDurationDays).length
+                return (
+                  <Card key={clinic.id} className="border-0 shadow-md cursor-pointer transition-all hover:shadow-lg active:scale-[0.99]" onClick={() => { setSelectedClinic(clinic); setView("clinic") }}>
+                    <CardContent className="p-4">
+                      <div className="flex items-start justify-between mb-3">
+                        <div className="flex items-center gap-3">
+                          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary/10">
+                            <Building2 className="h-5 w-5 text-primary" />
+                          </div>
+                          <div>
+                            <p className="font-semibold text-foreground text-sm">{clinic.name}</p>
+                            <div className="flex items-center gap-1 text-xs text-muted-foreground mt-0.5">
+                              <MapPin className="h-3 w-3" />
+                              <span>{clinic.city}</span>
+                            </div>
                           </div>
                         </div>
+                        <ChevronRight className="h-4 w-4 text-muted-foreground mt-1" />
                       </div>
-                      <ChevronRight className="h-4 w-4 text-muted-foreground mt-1" />
-                    </div>
-                    <div className="grid grid-cols-3 gap-2 text-center">
-                      <div className="rounded-lg bg-muted py-2">
-                        <p className="text-sm font-bold text-foreground">{clinicDoctors.length}</p>
-                        <p className="text-xs text-muted-foreground">médicos</p>
+                      <div className="grid grid-cols-3 gap-2 text-center">
+                        <div className="rounded-lg bg-muted py-2">
+                          <p className="text-sm font-bold text-foreground">{clinicDoctors.length}</p>
+                          <p className="text-xs text-muted-foreground">médicos</p>
+                        </div>
+                        <div className="rounded-lg bg-muted py-2">
+                          <p className="text-sm font-bold text-foreground">{clinicPatients.length}</p>
+                          <p className="text-xs text-muted-foreground">pacientes</p>
+                        </div>
+                        <div className="rounded-lg bg-primary/5 py-2">
+                          <p className="text-sm font-bold text-primary">{active}</p>
+                          <p className="text-xs text-muted-foreground">activos</p>
+                        </div>
                       </div>
-                      <div className="rounded-lg bg-muted py-2">
-                        <p className="text-sm font-bold text-foreground">{clinicPatients.length}</p>
-                        <p className="text-xs text-muted-foreground">pacientes</p>
-                      </div>
-                      <div className="rounded-lg bg-primary/5 py-2">
-                        <p className="text-sm font-bold text-primary">{active}</p>
-                        <p className="text-xs text-muted-foreground">activos</p>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              )
-            })}
+                    </CardContent>
+                  </Card>
+                )
+              })}
+            </div>
           </div>
-        </div>
+        )}
 
-        {/* All doctors summary */}
-        <div>
-          <h2 className="flex items-center gap-2 font-semibold text-foreground mb-3">
-            <Stethoscope className="h-5 w-5 text-primary" />
-            Todos los Médicos
-          </h2>
-          <div className="space-y-3">
-            {doctors.map((doc) => {
-              const docPatients = patients.filter((p) => p.doctorId === doc.id)
-              const clinic = clinics.find((c) => c.id === doc.clinicId)
-              return (
-                <Card
-                  key={doc.id}
-                  className="border-0 shadow-md cursor-pointer transition-all hover:shadow-lg"
-                  onClick={() => { setSelectedDoctor(doc); setSelectedClinic(clinic || null); setView("doctor") }}
-                >
-                  <CardContent className="p-4 flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                      <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10 font-semibold text-sm text-primary">
-                        {doc.avatarInitials}
+        {/* All doctors */}
+        {doctors.length > 0 && (
+          <div>
+            <h2 className="flex items-center gap-2 font-semibold text-foreground mb-3">
+              <Stethoscope className="h-5 w-5 text-primary" />
+              Todos los Médicos
+            </h2>
+            <div className="space-y-3">
+              {doctors.map((doc) => {
+                const docPatients = patients.filter(p => p.doctorId === doc.id)
+                const clinic = clinics.find(c => c.id === doc.clinicId)
+                return (
+                  <Card key={doc.id} className="border-0 shadow-md cursor-pointer transition-all hover:shadow-lg" onClick={() => { setSelectedDoctor(doc); setSelectedClinic(clinic || null); setView("doctor") }}>
+                    <CardContent className="p-4 flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10 font-semibold text-sm text-primary">{doc.avatarInitials}</div>
+                        <div>
+                          <p className="font-semibold text-foreground text-sm">{doc.name}</p>
+                          <p className="text-xs text-muted-foreground">{clinic?.city} — {doc.specialty}</p>
+                        </div>
                       </div>
-                      <div>
-                        <p className="font-semibold text-foreground text-sm">{doc.name}</p>
-                        <p className="text-xs text-muted-foreground">{clinic?.city} — {doc.specialty}</p>
+                      <div className="flex items-center gap-2">
+                        <div className="text-right">
+                          <p className="text-sm font-bold text-foreground">{docPatients.length}</p>
+                          <p className="text-xs text-muted-foreground">pacientes</p>
+                        </div>
+                        <ChevronRight className="h-4 w-4 text-muted-foreground" />
                       </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <div className="text-right">
-                        <p className="text-sm font-bold text-foreground">{docPatients.length}</p>
-                        <p className="text-xs text-muted-foreground">pacientes</p>
-                      </div>
-                      <ChevronRight className="h-4 w-4 text-muted-foreground" />
-                    </div>
-                  </CardContent>
-                </Card>
-              )
-            })}
+                    </CardContent>
+                  </Card>
+                )
+              })}
+            </div>
           </div>
-        </div>
+        )}
+
+        {totalClinics === 0 && totalDoctors === 0 && totalPatients === 0 && (
+          <Card className="border-dashed">
+            <CardContent className="p-8 text-center">
+              <p className="text-muted-foreground text-sm">No hay datos todavía.</p>
+              <p className="text-xs text-muted-foreground mt-1">Ve a <a href="/setup" className="text-primary underline">/setup</a> y usa el botón "Sembrar datos de prueba".</p>
+            </CardContent>
+          </Card>
+        )}
       </div>
     </main>
+  )
+}
+
+export default function SuperAdminDashboard() {
+  return (
+    <ProtectedRoute allowedRoles={["admin"]}>
+      <SuperAdminContent />
+    </ProtectedRoute>
   )
 }

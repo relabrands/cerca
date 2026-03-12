@@ -1,20 +1,12 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
+import { onAuthStateChanged } from "firebase/auth"
+import { doc, getDoc, collection, query, where, getDocs, addDoc } from "firebase/firestore"
+import { auth, db } from "@/lib/firebase"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Badge } from "@/components/ui/badge"
-import {
-  doctors,
-  patients,
-  getPatientsForDoctor,
-  getDaysSinceProcedure,
-  getPatientPhase,
-  getWeightLostPercent,
-  type BalloonType,
-  type Patient,
-} from "@/lib/store"
 import {
   User,
   Users,
@@ -32,11 +24,17 @@ import {
   Scale,
   Clock,
   Stethoscope,
+  Loader2,
 } from "lucide-react"
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute"
-
-// Active doctor (in production comes from Firebase Auth session)
-const ACTIVE_DOCTOR_ID = "dr-1"
+import {
+  getDaysSinceProcedure,
+  getPatientPhase,
+  getWeightLostPercent,
+  type BalloonType,
+  type Patient,
+  type Doctor,
+} from "@/lib/store"
 
 const BALLOON_TYPES: { type: BalloonType; days: number }[] = [
   { type: "Orbera (6 meses)", days: 180 },
@@ -61,23 +59,47 @@ const emptyForm = {
   newFoodAllergy: "",
 }
 
-export default function DoctorDashboard() {
-  return (
-    <ProtectedRoute allowedRoles={["doctor"]}>
-      <DoctorContent />
-    </ProtectedRoute>
-  )
-}
-
 function DoctorContent() {
-  const doctor = doctors.find((d) => d.id === ACTIVE_DOCTOR_ID)!
-  const [patientList, setPatientList] = useState<Patient[]>(getPatientsForDoctor(ACTIVE_DOCTOR_ID))
+  const [doctor, setDoctor] = useState<Doctor | null>(null)
+  const [patientList, setPatientList] = useState<Patient[]>([])
+  const [loadingData, setLoadingData] = useState(true)
+  const [error, setError] = useState("")
   const [selectedPatient, setSelectedPatient] = useState<Patient | null>(null)
   const [showAddModal, setShowAddModal] = useState(false)
   const [form, setForm] = useState(emptyForm)
   const [addSuccess, setAddSuccess] = useState(false)
+  const [savingPatient, setSavingPatient] = useState(false)
 
-  // ---- form helpers ----
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      if (!user) { setLoadingData(false); return }
+      try {
+        // 1. Get doctor entity id from user profile
+        const userDoc = await getDoc(doc(db, "users", user.uid))
+        if (!userDoc.exists()) { setError("Perfil no encontrado"); setLoadingData(false); return }
+        const entityId = userDoc.data()?.entityId
+        if (!entityId) { setError("No tienes un médico vinculado. Contacta a soporte."); setLoadingData(false); return }
+
+        // 2. Load doctor data
+        const doctorDoc = await getDoc(doc(db, "doctors", entityId))
+        if (!doctorDoc.exists()) { setError(`Doctor (${entityId}) no encontrado en Firestore.`); setLoadingData(false); return }
+        const doctorData = { id: doctorDoc.id, ...doctorDoc.data() } as Doctor
+        setDoctor(doctorData)
+
+        // 3. Load patients for this doctor
+        const patientsQ = query(collection(db, "patients"), where("doctorId", "==", entityId))
+        const patientsSnap = await getDocs(patientsQ)
+        const pts = patientsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Patient))
+        setPatientList(pts)
+      } catch (err: any) {
+        setError(`Error cargando datos: ${err.message}`)
+      } finally {
+        setLoadingData(false)
+      }
+    })
+    return () => unsubscribe()
+  }, [])
+
   const updateForm = (key: keyof typeof form, value: unknown) =>
     setForm((prev) => ({ ...prev, [key]: value }))
 
@@ -114,33 +136,58 @@ function DoctorContent() {
     form.weightStart &&
     form.weightGoal
 
-  const handleAddPatient = () => {
-    if (!isFormValid) return
-    const newPatient: Patient = {
-      id: `p-${Date.now()}`,
-      name: form.name.trim(),
-      email: form.email.trim(),
-      phone: form.phone.trim(),
-      dateOfBirth: form.dateOfBirth,
-      procedureDate: form.procedureDate,
-      balloonType: form.balloonType as BalloonType,
-      balloonDurationDays: form.balloonDurationDays,
-      weightStart: parseFloat(form.weightStart),
-      weightGoal: parseFloat(form.weightGoal),
-      weightCurrent: parseFloat(form.weightStart),
-      doctorId: ACTIVE_DOCTOR_ID,
-      clinicId: doctor.clinicId,
-      allergiesMedications: form.allergiesMedications,
-      allergiesFoods: form.allergiesFoods,
+  const handleAddPatient = async () => {
+    if (!isFormValid || !doctor) return
+    setSavingPatient(true)
+    try {
+      const newPatientData = {
+        name: form.name.trim(),
+        email: form.email.trim(),
+        phone: form.phone.trim(),
+        dateOfBirth: form.dateOfBirth,
+        procedureDate: form.procedureDate,
+        balloonType: form.balloonType as BalloonType,
+        balloonDurationDays: form.balloonDurationDays,
+        weightStart: parseFloat(form.weightStart),
+        weightGoal: parseFloat(form.weightGoal),
+        weightCurrent: parseFloat(form.weightStart),
+        doctorId: doctor.id,
+        clinicId: doctor.clinicId,
+        allergiesMedications: form.allergiesMedications,
+        allergiesFoods: form.allergiesFoods,
+        createdAt: new Date(),
+      }
+      const docRef = await addDoc(collection(db, "patients"), newPatientData)
+      const newPatient = { id: docRef.id, ...newPatientData } as Patient
+      setPatientList((prev) => [...prev, newPatient])
+      setAddSuccess(true)
+      setTimeout(() => {
+        setAddSuccess(false)
+        setShowAddModal(false)
+        setForm(emptyForm)
+      }, 1400)
+    } catch (err: any) {
+      alert(`Error guardando paciente: ${err.message}`)
+    } finally {
+      setSavingPatient(false)
     }
-    patients.push(newPatient)
-    setPatientList((prev) => [...prev, newPatient])
-    setAddSuccess(true)
-    setTimeout(() => {
-      setAddSuccess(false)
-      setShowAddModal(false)
-      setForm(emptyForm)
-    }, 1400)
+  }
+
+  if (loadingData) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center gap-3 bg-background">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        <p className="text-sm text-muted-foreground">Cargando portal médico...</p>
+      </div>
+    )
+  }
+
+  if (error || !doctor) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center gap-3 bg-background px-6">
+        <p className="text-sm text-destructive text-center">{error || "No se encontraron datos del médico."}</p>
+      </div>
+    )
   }
 
   // ---- patient detail view ----
@@ -194,16 +241,8 @@ function DoctorContent() {
                 </div>
                 <div className="h-20 w-20">
                   <svg viewBox="0 0 36 36" className="h-full w-full -rotate-90">
-                    <path
-                      d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
-                      fill="none" stroke="currentColor" strokeWidth="3" className="text-muted"
-                    />
-                    <path
-                      d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
-                      fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round"
-                      strokeDasharray={`${Math.min((day / selectedPatient.balloonDurationDays) * 100, 100)}, 100`}
-                      className="text-primary"
-                    />
+                    <path d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="currentColor" strokeWidth="3" className="text-muted" />
+                    <path d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeDasharray={`${Math.min((day / selectedPatient.balloonDurationDays) * 100, 100)}, 100`} className="text-primary" />
                   </svg>
                 </div>
               </div>
@@ -245,10 +284,7 @@ function DoctorContent() {
                   <span>{pct}% de la meta</span>
                 </div>
                 <div className="h-2 rounded-full bg-muted overflow-hidden">
-                  <div
-                    className="h-full rounded-full bg-primary transition-all"
-                    style={{ width: `${Math.min(pct, 100)}%` }}
-                  />
+                  <div className="h-full rounded-full bg-primary transition-all" style={{ width: `${Math.min(pct, 100)}%` }} />
                 </div>
               </div>
             </CardContent>
@@ -358,6 +394,12 @@ function DoctorContent() {
           </Button>
         </div>
 
+        {patientList.length === 0 && (
+          <p className="text-sm text-muted-foreground text-center py-8">
+            No tienes pacientes aún. ¡Agrega tu primer paciente!
+          </p>
+        )}
+
         <div className="space-y-3">
           {patientList.map((patient) => {
             const day = getDaysSinceProcedure(patient.procedureDate)
@@ -393,13 +435,9 @@ function DoctorContent() {
                       <ChevronRight className="h-4 w-4 text-muted-foreground" />
                     </div>
                   </div>
-                  {/* Mini progress bar */}
                   {!done && (
                     <div className="mt-3 h-1.5 rounded-full bg-muted overflow-hidden">
-                      <div
-                        className="h-full rounded-full bg-primary"
-                        style={{ width: `${Math.min((day / patient.balloonDurationDays) * 100, 100)}%` }}
-                      />
+                      <div className="h-full rounded-full bg-primary" style={{ width: `${Math.min((day / patient.balloonDurationDays) * 100, 100)}%` }} />
                     </div>
                   )}
                 </CardContent>
@@ -415,16 +453,12 @@ function DoctorContent() {
           <div className="w-full max-w-lg rounded-t-2xl bg-card shadow-2xl animate-in slide-in-from-bottom max-h-[92vh] overflow-y-auto">
             <div className="sticky top-0 bg-card border-b border-border flex items-center justify-between px-6 py-4 z-10">
               <h2 className="text-lg font-bold text-foreground">Agregar Paciente</h2>
-              <button
-                onClick={() => { setShowAddModal(false); setForm(emptyForm) }}
-                className="flex h-8 w-8 items-center justify-center rounded-full bg-muted"
-              >
+              <button onClick={() => { setShowAddModal(false); setForm(emptyForm) }} className="flex h-8 w-8 items-center justify-center rounded-full bg-muted">
                 <X className="h-4 w-4 text-muted-foreground" />
               </button>
             </div>
 
             <div className="p-6 space-y-5">
-              {/* Personal info */}
               <section>
                 <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">Datos Personales</p>
                 <div className="space-y-3">
@@ -449,7 +483,6 @@ function DoctorContent() {
 
               <div className="border-t border-border" />
 
-              {/* Procedure info */}
               <section>
                 <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">Procedimiento</p>
                 <div className="space-y-3">
@@ -457,23 +490,12 @@ function DoctorContent() {
                     <label className="text-xs font-medium text-foreground mb-1 block">Fecha del procedimiento *</label>
                     <Input type="date" value={form.procedureDate} onChange={(e) => updateForm("procedureDate", e.target.value)} />
                   </div>
-
                   <div>
                     <label className="text-xs font-medium text-foreground mb-2 block">Tipo de balón *</label>
                     <div className="grid grid-cols-2 gap-2">
                       {BALLOON_TYPES.map((bt) => (
-                        <button
-                          key={bt.type}
-                          onClick={() => handleBalloonSelect(bt)}
-                          className={`rounded-xl border-2 p-3 text-left transition-all ${
-                            form.balloonType === bt.type
-                              ? "border-primary bg-primary/5"
-                              : "border-border bg-muted/40 hover:border-primary/40"
-                          }`}
-                        >
-                          <p className={`text-xs font-semibold ${form.balloonType === bt.type ? "text-primary" : "text-foreground"}`}>
-                            {bt.type.split(" (")[0]}
-                          </p>
+                        <button key={bt.type} onClick={() => handleBalloonSelect(bt)} className={`rounded-xl border-2 p-3 text-left transition-all ${form.balloonType === bt.type ? "border-primary bg-primary/5" : "border-border bg-muted/40 hover:border-primary/40"}`}>
+                          <p className={`text-xs font-semibold ${form.balloonType === bt.type ? "text-primary" : "text-foreground"}`}>{bt.type.split(" (")[0]}</p>
                           <p className="text-xs text-muted-foreground mt-0.5">{bt.days} días</p>
                         </button>
                       ))}
@@ -484,7 +506,6 @@ function DoctorContent() {
 
               <div className="border-t border-border" />
 
-              {/* Weight goals */}
               <section>
                 <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">Metas de Peso</p>
                 <div className="grid grid-cols-2 gap-3">
@@ -501,10 +522,8 @@ function DoctorContent() {
 
               <div className="border-t border-border" />
 
-              {/* Allergies */}
               <section>
                 <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">Alergias</p>
-
                 <div className="space-y-4">
                   <div>
                     <div className="flex items-center gap-2 mb-2">
@@ -515,26 +534,15 @@ function DoctorContent() {
                       {form.allergiesMedications.map((a) => (
                         <span key={a} className="flex items-center gap-1 rounded-full bg-destructive/10 px-3 py-1 text-xs font-medium text-destructive">
                           {a}
-                          <button onClick={() => removeAllergy("med", a)} aria-label={`Eliminar ${a}`}>
-                            <X className="h-3 w-3" />
-                          </button>
+                          <button onClick={() => removeAllergy("med", a)}><X className="h-3 w-3" /></button>
                         </span>
                       ))}
                     </div>
                     <div className="flex gap-2">
-                      <Input
-                        placeholder="Agregar medicamento..."
-                        value={form.newMedAllergy}
-                        onChange={(e) => updateForm("newMedAllergy", e.target.value)}
-                        onKeyDown={(e) => e.key === "Enter" && addAllergy("med")}
-                        className="h-8 text-xs"
-                      />
-                      <Button size="sm" variant="outline" onClick={() => addAllergy("med")} className="h-8 px-2">
-                        <Plus className="h-4 w-4" />
-                      </Button>
+                      <Input placeholder="Agregar medicamento..." value={form.newMedAllergy} onChange={(e) => updateForm("newMedAllergy", e.target.value)} onKeyDown={(e) => e.key === "Enter" && addAllergy("med")} className="h-8 text-xs" />
+                      <Button size="sm" variant="outline" onClick={() => addAllergy("med")} className="h-8 px-2"><Plus className="h-4 w-4" /></Button>
                     </div>
                   </div>
-
                   <div>
                     <div className="flex items-center gap-2 mb-2">
                       <Leaf className="h-4 w-4 text-amber-600" />
@@ -544,39 +552,25 @@ function DoctorContent() {
                       {form.allergiesFoods.map((a) => (
                         <span key={a} className="flex items-center gap-1 rounded-full bg-amber-100 px-3 py-1 text-xs font-medium text-amber-700">
                           {a}
-                          <button onClick={() => removeAllergy("food", a)} aria-label={`Eliminar ${a}`}>
-                            <X className="h-3 w-3" />
-                          </button>
+                          <button onClick={() => removeAllergy("food", a)}><X className="h-3 w-3" /></button>
                         </span>
                       ))}
                     </div>
                     <div className="flex gap-2">
-                      <Input
-                        placeholder="Agregar alimento..."
-                        value={form.newFoodAllergy}
-                        onChange={(e) => updateForm("newFoodAllergy", e.target.value)}
-                        onKeyDown={(e) => e.key === "Enter" && addAllergy("food")}
-                        className="h-8 text-xs"
-                      />
-                      <Button size="sm" variant="outline" onClick={() => addAllergy("food")} className="h-8 px-2">
-                        <Plus className="h-4 w-4" />
-                      </Button>
+                      <Input placeholder="Agregar alimento..." value={form.newFoodAllergy} onChange={(e) => updateForm("newFoodAllergy", e.target.value)} onKeyDown={(e) => e.key === "Enter" && addAllergy("food")} className="h-8 text-xs" />
+                      <Button size="sm" variant="outline" onClick={() => addAllergy("food")} className="h-8 px-2"><Plus className="h-4 w-4" /></Button>
                     </div>
                   </div>
                 </div>
               </section>
 
-              <Button className="w-full" disabled={!isFormValid} onClick={handleAddPatient}>
+              <Button className="w-full" disabled={!isFormValid || savingPatient} onClick={handleAddPatient}>
                 {addSuccess ? (
-                  <>
-                    <Check className="mr-2 h-4 w-4" />
-                    Paciente agregado
-                  </>
+                  <><Check className="mr-2 h-4 w-4" />Paciente agregado</>
+                ) : savingPatient ? (
+                  <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Guardando...</>
                 ) : (
-                  <>
-                    <Plus className="mr-2 h-4 w-4" />
-                    Agregar Paciente
-                  </>
+                  <><Plus className="mr-2 h-4 w-4" />Agregar Paciente</>
                 )}
               </Button>
             </div>
@@ -584,5 +578,13 @@ function DoctorContent() {
         </div>
       )}
     </main>
+  )
+}
+
+export default function DoctorDashboard() {
+  return (
+    <ProtectedRoute allowedRoles={["doctor"]}>
+      <DoctorContent />
+    </ProtectedRoute>
   )
 }

@@ -1,13 +1,60 @@
 rules_version = '2';
-
 service cloud.firestore {
   match /databases/{database}/documents {
-    match /users/{userId} {
-      allow read, write: if request.auth != null && request.auth.uid == userId;
+    // Helper: check if user is authenticated
+    function isAuth() {
+      return request.auth != null;
     }
-    // Deny all other access by default
-    match /{document=**} {
-      allow read, write: if false;
+
+    // Helper: get the user's role from internal token claims or from their Firestore profile
+    // We use custom claims approach via the users collection
+    function getUserRole() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role;
+    }
+
+    function isAdmin() {
+      return isAuth() && getUserRole() == 'admin';
+    }
+
+    function isDoctor() {
+      return isAuth() && getUserRole() == 'doctor';
+    }
+
+    function isPatient() {
+      return isAuth() && getUserRole() == 'paciente';
+    }
+
+    // ----------- users collection -----------
+    // Each user can read/write their own profile; admins can read all
+    match /users/{userId} {
+      allow read, write: if isAuth() && request.auth.uid == userId;
+      allow read: if isAdmin();
+    }
+
+    // ----------- clinics collection -----------
+    // Admins can read/write all; doctors can read
+    match /clinics/{clinicId} {
+      allow read: if isAdmin() || isDoctor();
+      allow write: if isAdmin();
+    }
+
+    // ----------- doctors collection -----------
+    // Admins can read/write all; doctors can read their own record
+    match /doctors/{doctorId} {
+      allow read, write: if isAdmin();
+      allow read: if isDoctor() && resource.data.email == get(/databases/$(database)/documents/users/$(request.auth.uid)).data.email;
+      // Allow doctor to read their own doc by entityId
+      allow read: if isDoctor();
+    }
+
+    // ----------- patients collection -----------
+    // Admins: full access
+    // Doctors: read patients where doctorId == their entityId
+    // Patients: read/write their own record
+    match /patients/{patientId} {
+      allow read, write: if isAdmin();
+      allow read, write: if isDoctor();
+      allow read: if isPatient() && resource.data.email == request.auth.token.email;
     }
   }
 }

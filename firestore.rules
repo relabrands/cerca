@@ -32,24 +32,24 @@ service cloud.firestore {
 
     // ----------- clinics collection -----------
     match /clinics/{clinicId} {
-      allow read: if isAdmin() || isDoctor();
+      allow read: if isAdmin() || isDoctor() || isPatient();
       allow write: if isAdmin();
     }
 
     // ----------- doctors collection -----------
     match /doctors/{doctorId} {
       allow read, write: if isAdmin();
-      allow read: if isDoctor();
+      allow read: if isDoctor() || isPatient();
     }
 
     // ----------- patients collection -----------
     // Admin: full access
     // Doctor: full access (can add/read/update their patients)
-    // Patient: read their own record (matched by email)
+    // Patient: read/write their own record (matched by email)
     match /patients/{patientId} {
       allow read, write: if isAdmin();
       allow read, write: if isDoctor();
-      allow read: if isPatient() && resource.data.email == request.auth.token.email;
+      allow read, write: if isPatient() && resource.data.email == request.auth.token.email;
     }
   }
 }

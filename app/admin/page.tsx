@@ -159,7 +159,16 @@ function SuperAdminContent() {
       }
       await setDoc(doc(db, "doctors", entityId), newDoctor)
 
-      setDoctors((prev) => [...prev, { ...newDoctor } as Doctor])
+      setDoctors((prev) => [...prev, {
+        id: entityId,
+        name: doctorForm.name,
+        specialty: doctorForm.specialty,
+        email: doctorForm.email,
+        phone: doctorForm.phone,
+        clinicId: doctorForm.clinicId,
+        avatarInitials: initials,
+        patientIds: [],
+      } as Doctor])
       setSaveSuccess(true)
       setTimeout(() => {
         setSaveSuccess(false)

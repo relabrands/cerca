@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react"
 import { onAuthStateChanged } from "firebase/auth"
-import { doc, getDoc } from "firebase/firestore"
+import { doc, getDoc, collection, query, where, getDocs } from "firebase/firestore"
 import { auth, db } from "@/lib/firebase"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -41,30 +41,33 @@ function PatientContent() {
         return
       }
       try {
-        // 1. Get user profile to find entityId
+        // 1. Try loading patient via entityId in user profile
         const userDoc = await getDoc(doc(db, "users", user.uid))
-        if (!userDoc.exists()) {
-          setError("Perfil de usuario no encontrado.")
-          setLoadingData(false)
-          return
-        }
-        const userData = userDoc.data()
+        const userData = userDoc.exists() ? userDoc.data() : null
         const entityId = userData?.entityId
 
-        if (!entityId) {
-          setError("No tienes un paciente vinculado. Contacta a soporte.")
-          setLoadingData(false)
-          return
+        if (entityId) {
+          const patientDoc = await getDoc(doc(db, "patients", entityId))
+          if (patientDoc.exists()) {
+            setPatient({ id: patientDoc.id, ...patientDoc.data() } as Patient)
+            setLoadingData(false)
+            return
+          }
         }
 
-        // 2. Load patient data from Firestore
-        const patientDoc = await getDoc(doc(db, "patients", entityId))
-        if (!patientDoc.exists()) {
-          setError(`Datos del paciente (${entityId}) no encontrados en Firestore.`)
-          setLoadingData(false)
-          return
+        // 2. Fallback: find patient record by email
+        if (user.email) {
+          const q = query(collection(db, "patients"), where("email", "==", user.email))
+          const snap = await getDocs(q)
+          if (!snap.empty) {
+            const patientDoc = snap.docs[0]
+            setPatient({ id: patientDoc.id, ...patientDoc.data() } as Patient)
+            setLoadingData(false)
+            return
+          }
         }
-        setPatient({ id: patientDoc.id, ...patientDoc.data() } as Patient)
+
+        setError("No se encontraron tus datos de paciente. Pide a tu médico que los registre.")
       } catch (err: any) {
         setError(`Error cargando datos: ${err.message}`)
       } finally {

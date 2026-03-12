@@ -16,7 +16,7 @@ import {
   ResponsiveContainer,
   Tooltip,
 } from "recharts"
-import { type Patient } from "@/lib/store"
+import { getDaysSinceProcedure, type Patient } from "@/lib/store"
 import { onAuthStateChanged } from "firebase/auth"
 import { doc, getDoc, collection, query, where, getDocs } from "firebase/firestore"
 import { auth, db } from "@/lib/firebase"
@@ -137,6 +137,9 @@ export default function ProgresoPage() {
     ? ((startWeight - currentWeight) / (startWeight - goalWeight)) * 100 
     : 0
 
+  const currentDayRaw = getDaysSinceProcedure(patient.procedureDate)
+  const treatmentDone = currentDayRaw >= patient.balloonDurationDays
+
   return (
     <ProtectedRoute allowedRoles={["paciente", "patient"]}>
       <main className="min-h-screen bg-background pb-24">
@@ -234,76 +237,78 @@ export default function ProgresoPage() {
         </Card>
 
         {/* Satiety Log */}
-        <Card className="border-0 shadow-md">
-          <CardHeader className="pb-2">
-            <CardTitle className="flex items-center gap-2 text-base">
-              <Activity className="h-5 w-5 text-primary" />
-              Nivel de Saciedad
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            {satietyLogged ? (
-              <div className="text-center py-4">
-                <div className="mx-auto mb-2 flex h-12 w-12 items-center justify-center rounded-full bg-primary/10">
-                  <Activity className="h-6 w-6 text-primary" />
-                </div>
-                <p className="font-medium text-foreground">Registrado: Nivel {selectedSatiety}</p>
-                <p className="text-sm text-muted-foreground mt-1">
-                  {satietyLevels.find(s => s.value === selectedSatiety)?.label}
-                </p>
-                <Button 
-                  variant="outline" 
-                  className="mt-3"
-                  onClick={() => {
-                    setSatietyLogged(false)
-                    setSelectedSatiety(null)
-                  }}
-                >
-                  Registrar otro
-                </Button>
-              </div>
-            ) : (
-              <>
-                <p className="text-sm text-muted-foreground mb-4">
-                  ¿Cómo te sientes después de comer? Selecciona tu nivel de saciedad (1-10)
-                </p>
-                <div className="flex items-center justify-between mb-4">
-                  <span className="text-xs text-muted-foreground">Vacío</span>
-                  <span className="text-xs text-muted-foreground">Lleno</span>
-                </div>
-                <div className="grid grid-cols-10 gap-1 mb-4">
-                  {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((level) => (
-                    <button
-                      key={level}
-                      onClick={() => setSelectedSatiety(level)}
-                      className={`
-                        h-10 rounded-lg text-sm font-medium transition-all
-                        ${selectedSatiety === level 
-                          ? 'bg-primary text-primary-foreground' 
-                          : 'bg-muted text-muted-foreground hover:bg-muted/80'
-                        }
-                      `}
-                    >
-                      {level}
-                    </button>
-                  ))}
-                </div>
-                {selectedSatiety && (
-                  <p className="text-center text-sm text-muted-foreground mb-4">
+        {!treatmentDone && (
+          <Card className="border-0 shadow-md">
+            <CardHeader className="pb-2">
+              <CardTitle className="flex items-center gap-2 text-base">
+                <Activity className="h-5 w-5 text-primary" />
+                Nivel de Saciedad
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              {satietyLogged ? (
+                <div className="text-center py-4">
+                  <div className="mx-auto mb-2 flex h-12 w-12 items-center justify-center rounded-full bg-primary/10">
+                    <Activity className="h-6 w-6 text-primary" />
+                  </div>
+                  <p className="font-medium text-foreground">Registrado: Nivel {selectedSatiety}</p>
+                  <p className="text-sm text-muted-foreground mt-1">
                     {satietyLevels.find(s => s.value === selectedSatiety)?.label}
                   </p>
-                )}
-                <Button 
-                  onClick={handleSatietyLog} 
-                  className="w-full"
-                  disabled={!selectedSatiety}
-                >
-                  Registrar Saciedad
-                </Button>
-              </>
-            )}
-          </CardContent>
-        </Card>
+                  <Button 
+                    variant="outline" 
+                    className="mt-3"
+                    onClick={() => {
+                      setSatietyLogged(false)
+                      setSelectedSatiety(null)
+                    }}
+                  >
+                    Registrar otro
+                  </Button>
+                </div>
+              ) : (
+                <>
+                  <p className="text-sm text-muted-foreground mb-4">
+                    ¿Cómo te sientes después de comer? Selecciona tu nivel de saciedad (1-10)
+                  </p>
+                  <div className="flex items-center justify-between mb-4">
+                    <span className="text-xs text-muted-foreground">Vacío</span>
+                    <span className="text-xs text-muted-foreground">Lleno</span>
+                  </div>
+                  <div className="grid grid-cols-10 gap-1 mb-4">
+                    {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((level) => (
+                      <button
+                        key={level}
+                        onClick={() => setSelectedSatiety(level)}
+                        className={`
+                          h-10 rounded-lg text-sm font-medium transition-all
+                          ${selectedSatiety === level 
+                            ? 'bg-primary text-primary-foreground' 
+                            : 'bg-muted text-muted-foreground hover:bg-muted/80'
+                          }
+                        `}
+                      >
+                        {level}
+                      </button>
+                    ))}
+                  </div>
+                  {selectedSatiety && (
+                    <p className="text-center text-sm text-muted-foreground mb-4">
+                      {satietyLevels.find(s => s.value === selectedSatiety)?.label}
+                    </p>
+                  )}
+                  <Button 
+                    onClick={handleSatietyLog} 
+                    className="w-full"
+                    disabled={!selectedSatiety}
+                  >
+                    Registrar Saciedad
+                  </Button>
+                </>
+              )}
+            </CardContent>
+          </Card>
+        )}
 
         {/* Weekly Summary */}
         <Card className="border-0 shadow-md">

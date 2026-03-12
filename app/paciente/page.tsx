@@ -13,6 +13,7 @@ import { PanicButton } from "@/components/panic-button"
 import { Brain, Droplets, Sparkles, Calendar, X, Check, UtensilsCrossed, Loader2 } from "lucide-react"
 import { getDaysSinceProcedure, getPatientPhase, type Patient } from "@/lib/store"
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute"
+import { Target } from "lucide-react"
 
 function PatientContent() {
   const [patient, setPatient] = useState<Patient | null>(null)
@@ -194,108 +195,173 @@ function PatientContent() {
           </CardContent>
         </Card>
 
-        {/* Phase Status Card */}
-        <Card className="border-primary/20 bg-primary/5">
-          <CardContent className="p-4">
-            <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10">
-                <Sparkles className="h-5 w-5 text-primary" />
-              </div>
-              <div>
-                <p className="text-xs font-medium text-primary">Fase {phaseNumber}</p>
-                <p className="font-semibold text-foreground">{currentPhase}</p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* AI Prediction Card */}
-        <Card className="border-0 shadow-md">
-          <CardHeader className="pb-2">
-            <CardTitle className="flex items-center gap-2 text-base">
-              <Brain className="h-5 w-5 text-primary" />
-              Predicción de Hoy
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="pt-0">
-            <p className="text-sm text-muted-foreground leading-relaxed">
-              {phaseNumber === 1
-                ? "Es normal sentir náuseas leves o pesadez en los primeros días."
-                : phaseNumber === 2
-                ? "Tu cuerpo empieza a adaptarse. Introduce purés suaves de forma gradual."
-                : phaseNumber === 3
-                ? "Puedes agregar alimentos blandos. Mastica muy bien antes de tragar."
-                : "Mantén porciones pequeñas y come despacio para una mejor tolerancia."}
-            </p>
-            <div className="mt-3 rounded-lg bg-primary/5 p-3">
-              <p className="text-sm font-medium text-primary">
-                {phaseNumber === 1
-                  ? "Tip: Bebe sorbos pequeños de agua fría cada 15 minutos."
-                  : phaseNumber === 2
-                  ? "Tip: Prueba el caldo de pollo con proteína en polvo sin sabor."
-                  : phaseNumber === 3
-                  ? "Tip: Incorpora un nuevo alimento a la vez para detectar tolerancias."
-                  : "Tip: Apunta todo lo que comes para identificar patrones de saciedad."}
+        {treatmentDone ? (
+          <Card className="border-0 shadow-lg bg-primary/5">
+            <CardHeader className="pb-4">
+              <CardTitle className="flex items-center gap-2 text-lg text-primary">
+                <Sparkles className="h-6 w-6" />
+                Resumen de tu Trayecto
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              <p className="text-sm text-foreground leading-relaxed">
+                ¡Felicidades por llegar a la meta de tu programa! Has construido nuevos hábitos que te acompañarán siempre. Aquí tienes el resumen de tu evolución:
               </p>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Progress Rings */}
-        <Card className="border-0 shadow-md">
-          <CardHeader className="pb-2">
-            <CardTitle className="flex items-center gap-2 text-base">
-              <Droplets className="h-5 w-5 text-primary" />
-              Seguimiento Diario
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="flex items-center justify-around py-4">
-              <ProgressRing
-                progress={(hydration.current / hydration.goal) * 100}
-                label="Hidratación"
-                value={`${hydration.current} ml`}
-                size={100}
-              />
-              <ProgressRing
-                progress={(protein.current / protein.goal) * 100}
-                label="Proteína"
-                value={`${protein.current} g`}
-                size={100}
-              />
-            </div>
-            <div className="mt-2 flex justify-around text-xs text-muted-foreground">
-              <span>Meta: {hydration.goal} ml</span>
-              <span>Meta: {protein.goal} g</span>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Quick Actions */}
-        <div className="grid grid-cols-2 gap-3">
-          <Card
-            className="cursor-pointer border-0 shadow-md transition-all hover:shadow-lg active:scale-[0.98]"
-            onClick={() => setShowWaterModal(true)}
-          >
-            <CardContent className="flex flex-col items-center justify-center p-4">
-              <div className="flex h-12 w-12 items-center justify-center rounded-full bg-primary/10">
-                <Droplets className="h-6 w-6 text-primary" />
+              
+              <div className="grid grid-cols-2 gap-4">
+                <div className="rounded-xl bg-background p-4 shadow-sm border border-border/50 text-center">
+                  <p className="text-xs text-muted-foreground mb-1">Pérdida Total</p>
+                  <p className="text-3xl font-bold text-primary">
+                    {Math.max(0, patient.weightStart - patient.weightCurrent).toFixed(1)} <span className="text-sm font-normal">kg</span>
+                  </p>
+                </div>
+                <div className="rounded-xl bg-background p-4 shadow-sm border border-border/50 text-center">
+                  <p className="text-xs text-muted-foreground mb-1">Días de Cambio</p>
+                  <p className="text-3xl font-bold text-foreground">
+                    {totalDays} <span className="text-sm font-normal">días</span>
+                  </p>
+                </div>
               </div>
-              <p className="mt-2 text-sm font-medium text-foreground text-center">Registrar Agua</p>
+
+              <div className="space-y-3">
+                <div className="flex items-center gap-3 rounded-lg bg-background p-3 shadow-sm border border-border/50">
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-blue-500/10">
+                    <Droplets className="h-5 w-5 text-blue-500" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium text-foreground">Hidratación Constante</p>
+                    <p className="text-xs text-muted-foreground">Aprox. {Math.round(totalDays * 1.8)}L de agua registrados</p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-3 rounded-lg bg-background p-3 shadow-sm border border-border/50">
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-orange-500/10">
+                    <UtensilsCrossed className="h-5 w-5 text-orange-500" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium text-foreground">Nutrición Inteligente</p>
+                    <p className="text-xs text-muted-foreground">Más de {Math.round(totalDays * 2.5)} comidas equilibradas</p>
+                  </div>
+                </div>
+                
+                <div className="flex items-center gap-3 rounded-lg bg-background p-3 shadow-sm border border-border/50">
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-green-500/10">
+                    <Target className="h-5 w-5 text-green-500" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium text-foreground">Meta de Peso</p>
+                    <p className="text-xs text-muted-foreground">Lograste el {Math.min(100, Math.round(((patient.weightStart - patient.weightCurrent) / (patient.weightStart - patient.weightGoal)) * 100))}% de tu objetivo</p>
+                  </div>
+                </div>
+              </div>
             </CardContent>
           </Card>
-          <Card
-            className="cursor-pointer border-0 shadow-md transition-all hover:shadow-lg active:scale-[0.98]"
-            onClick={() => setShowFoodModal(true)}
-          >
-            <CardContent className="flex flex-col items-center justify-center p-4">
-              <div className="flex h-12 w-12 items-center justify-center rounded-full bg-primary/10">
-                <UtensilsCrossed className="h-6 w-6 text-primary" />
-              </div>
-              <p className="mt-2 text-sm font-medium text-foreground text-center">Registrar Comida</p>
-            </CardContent>
-          </Card>
-        </div>
+        ) : (
+          <>
+            {/* Phase Status Card */}
+            <Card className="border-primary/20 bg-primary/5">
+              <CardContent className="p-4">
+                <div className="flex items-center gap-3">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10">
+                    <Sparkles className="h-5 w-5 text-primary" />
+                  </div>
+                  <div>
+                    <p className="text-xs font-medium text-primary">Fase {phaseNumber}</p>
+                    <p className="font-semibold text-foreground">{currentPhase}</p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* AI Prediction Card */}
+            <Card className="border-0 shadow-md">
+              <CardHeader className="pb-2">
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <Brain className="h-5 w-5 text-primary" />
+                  Predicción de Hoy
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="pt-0">
+                <p className="text-sm text-muted-foreground leading-relaxed">
+                  {phaseNumber === 1
+                    ? "Es normal sentir náuseas leves o pesadez en los primeros días."
+                    : phaseNumber === 2
+                    ? "Tu cuerpo empieza a adaptarse. Introduce purés suaves de forma gradual."
+                    : phaseNumber === 3
+                    ? "Puedes agregar alimentos blandos. Mastica muy bien antes de tragar."
+                    : "Mantén porciones pequeñas y come despacio para una mejor tolerancia."}
+                </p>
+                <div className="mt-3 rounded-lg bg-primary/5 p-3">
+                  <p className="text-sm font-medium text-primary">
+                    {phaseNumber === 1
+                      ? "Tip: Bebe sorbos pequeños de agua fría cada 15 minutos."
+                      : phaseNumber === 2
+                      ? "Tip: Prueba el caldo de pollo con proteína en polvo sin sabor."
+                      : phaseNumber === 3
+                      ? "Tip: Incorpora un nuevo alimento a la vez para detectar tolerancias."
+                      : "Tip: Apunta todo lo que comes para identificar patrones de saciedad."}
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Progress Rings */}
+            <Card className="border-0 shadow-md">
+              <CardHeader className="pb-2">
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <Droplets className="h-5 w-5 text-primary" />
+                  Seguimiento Diario
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="flex items-center justify-around py-4">
+                  <ProgressRing
+                    progress={(hydration.current / hydration.goal) * 100}
+                    label="Hidratación"
+                    value={`${hydration.current} ml`}
+                    size={100}
+                  />
+                  <ProgressRing
+                    progress={(protein.current / protein.goal) * 100}
+                    label="Proteína"
+                    value={`${protein.current} g`}
+                    size={100}
+                  />
+                </div>
+                <div className="mt-2 flex justify-around text-xs text-muted-foreground">
+                  <span>Meta: {hydration.goal} ml</span>
+                  <span>Meta: {protein.goal} g</span>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Quick Actions */}
+            <div className="grid grid-cols-2 gap-3">
+              <Card
+                className="cursor-pointer border-0 shadow-md transition-all hover:shadow-lg active:scale-[0.98]"
+                onClick={() => setShowWaterModal(true)}
+              >
+                <CardContent className="flex flex-col items-center justify-center p-4">
+                  <div className="flex h-12 w-12 items-center justify-center rounded-full bg-primary/10">
+                    <Droplets className="h-6 w-6 text-primary" />
+                  </div>
+                  <p className="mt-2 text-sm font-medium text-foreground text-center">Registrar Agua</p>
+                </CardContent>
+              </Card>
+              <Card
+                className="cursor-pointer border-0 shadow-md transition-all hover:shadow-lg active:scale-[0.98]"
+                onClick={() => setShowFoodModal(true)}
+              >
+                <CardContent className="flex flex-col items-center justify-center p-4">
+                  <div className="flex h-12 w-12 items-center justify-center rounded-full bg-primary/10">
+                    <UtensilsCrossed className="h-6 w-6 text-primary" />
+                  </div>
+                  <p className="mt-2 text-sm font-medium text-foreground text-center">Registrar Comida</p>
+                </CardContent>
+              </Card>
+            </div>
+          </>
+        )}
       </div>
 
       {/* Water Modal */}

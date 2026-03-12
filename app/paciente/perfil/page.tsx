@@ -174,7 +174,10 @@ export default function PerfilPage() {
     )
   }
 
-  const currentDay = getDaysSinceProcedure(patient.procedureDate)
+  const currentDayRaw = getDaysSinceProcedure(patient.procedureDate)
+  const treatmentDone = currentDayRaw >= patient.balloonDurationDays
+  const currentDay = treatmentDone ? patient.balloonDurationDays : currentDayRaw
+  
   const { phase: phaseNumber, label: phaseLabel } = getPatientPhase(currentDay)
   const weightLostPct = getWeightLostPercent(patient.weightStart, patient.weightCurrent, patient.weightGoal)
   const weightLost = patient.weightStart - patient.weightCurrent
@@ -211,10 +214,17 @@ export default function PerfilPage() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-xs text-muted-foreground">Progreso del balón</p>
-                <p className="text-3xl font-bold text-foreground mt-0.5">
-                  Día {currentDay}
-                  <span className="text-base font-normal text-muted-foreground"> de {patient.balloonDurationDays}</span>
-                </p>
+                {treatmentDone ? (
+                  <p className="text-3xl font-bold text-green-600 mt-0.5">
+                    ¡Completado!
+                    <span className="block text-sm font-normal text-muted-foreground mt-1">Programa finalizado</span>
+                  </p>
+                ) : (
+                  <p className="text-3xl font-bold text-foreground mt-0.5">
+                    Día {currentDay}
+                    <span className="text-base font-normal text-muted-foreground"> de {patient.balloonDurationDays}</span>
+                  </p>
+                )}
               </div>
               <div className="h-16 w-16">
                 <svg viewBox="0 0 36 36" className="h-full w-full -rotate-90">
@@ -226,7 +236,7 @@ export default function PerfilPage() {
                     d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
                     fill="none" stroke="currentColor" strokeWidth="3.5" strokeLinecap="round"
                     strokeDasharray={`${Math.min((currentDay / patient.balloonDurationDays) * 100, 100)}, 100`}
-                    className="text-primary"
+                    className={treatmentDone ? "text-green-500" : "text-primary"}
                   />
                 </svg>
               </div>
@@ -237,9 +247,11 @@ export default function PerfilPage() {
                 <p className="text-xs text-muted-foreground">Tipo de balón</p>
                 <p className="text-sm font-semibold text-foreground mt-0.5">{patient.balloonType}</p>
               </div>
-              <div className="rounded-xl bg-primary/5 p-3">
-                <p className="text-xs text-muted-foreground">Fase actual</p>
-                <p className="text-sm font-semibold text-primary mt-0.5">Fase {phaseNumber}: {phaseLabel}</p>
+              <div className={treatmentDone ? "rounded-xl bg-green-500/10 p-3" : "rounded-xl bg-primary/5 p-3"}>
+                <p className="text-xs text-muted-foreground">{treatmentDone ? "Estado" : "Fase actual"}</p>
+                <p className={`text-sm font-semibold mt-0.5 ${treatmentDone ? "text-green-600" : "text-primary"}`}>
+                  {treatmentDone ? "Finalizado" : `Fase ${phaseNumber}: ${phaseLabel}`}
+                </p>
               </div>
             </div>
 

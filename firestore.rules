@@ -61,6 +61,11 @@ service cloud.firestore {
         allow read, write: if isAdmin() || isDoctor();
         allow read, write: if isPatient();
       }
+      // weightLogs subcollection: patient logs their weekly weigh-ins
+      match /weightLogs/{logId} {
+        allow read, write: if isAdmin() || isDoctor();
+        allow read, write: if isPatient();
+      }
     }
 
     // ----------- alerts collection -----------

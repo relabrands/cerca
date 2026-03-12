@@ -82,25 +82,42 @@ function PatientContent() {
           setProtein(p => ({ ...p, current: data.protein_g ?? 0 }))
         }
 
-        // Fetch AI prediction in background
-        const currentDay = getDaysSinceProcedure(fetchedPatient.procedureDate)
-        const { phase } = getPatientPhase(currentDay)
-        fetch("/api/ai/predict", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            phase,
-            weightStart: fetchedPatient.weightStart,
-            weightCurrent: fetchedPatient.weightCurrent,
-            allergies: [
-              ...(fetchedPatient.allergiesFoods || []),
-              ...(fetchedPatient.allergiesMedications || []),
-            ],
-          }),
-        })
-          .then(r => r.json())
-          .then(data => { if (data.prediction) setPrediction(data.prediction) })
-          .catch(() => {})
+        // Load prediction — read from Firestore cache first, only call AI if missing
+        const cachedPrediction = logSnap.exists() && logSnap.data().prediction
+        if (cachedPrediction) {
+          setPrediction(cachedPrediction)
+        } else {
+          // Generate prediction and cache it in Firestore
+          const currentDay = getDaysSinceProcedure(fetchedPatient.procedureDate)
+          const { phase } = getPatientPhase(currentDay)
+          fetch("/api/ai/predict", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              phase,
+              weightStart: fetchedPatient.weightStart,
+              weightCurrent: fetchedPatient.weightCurrent,
+              allergies: [
+                ...(fetchedPatient.allergiesFoods || []),
+                ...(fetchedPatient.allergiesMedications || []),
+              ],
+            }),
+          })
+            .then(r => r.json())
+            .then(async data => {
+              if (data.prediction) {
+                setPrediction(data.prediction)
+                // Cache in Firestore so it doesn't regenerate on every visit today
+                const p = patientRef.current
+                if (p) {
+                  const logRef = doc(db, "patients", p.id, "dailyLogs", todayKey())
+                  await setDoc(logRef, { prediction: data.prediction }, { merge: true })
+                }
+              }
+            })
+            .catch(() => {})
+        }
+
 
       } catch (err: any) {
         setError(`Error cargando datos: ${err.message}`)

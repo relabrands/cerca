@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -8,13 +8,16 @@ import { Input } from "@/components/ui/input"
 import { BottomNav } from "@/components/bottom-nav"
 import { PanicButton } from "@/components/panic-button"
 import {
-  patients,
-  doctors,
-  clinics,
   getDaysSinceProcedure,
   getPatientPhase,
   getWeightLostPercent,
+  type Patient,
+  type Doctor,
+  type Clinic
 } from "@/lib/store"
+import { onAuthStateChanged } from "firebase/auth"
+import { doc, getDoc, collection, query, where, getDocs } from "firebase/firestore"
+import { auth, db } from "@/lib/firebase"
 import {
   User,
   Building2,
@@ -37,10 +40,8 @@ import {
   Activity,
   Scale,
   Target,
+  Loader2
 } from "lucide-react"
-
-// Active patient session — in production resolved from Firebase Auth
-const ACTIVE_PATIENT_ID = "p-1"
 
 const menuItems = [
   { icon: Bell, label: "Notificaciones" },
@@ -50,22 +51,77 @@ const menuItems = [
 ]
 
 export default function PerfilPage() {
-  const patient = patients.find((p) => p.id === ACTIVE_PATIENT_ID)!
-  const doctor = doctors.find((d) => d.id === patient.doctorId)
-  const clinic = clinics.find((c) => c.id === patient.clinicId)
+  const [patient, setPatient] = useState<Patient | null>(null)
+  const [doctor, setDoctor] = useState<Doctor | null>(null)
+  const [clinic, setClinic] = useState<Clinic | null>(null)
+  const [loadingData, setLoadingData] = useState(true)
+  const [error, setError] = useState("")
 
-  const currentDay = getDaysSinceProcedure(patient.procedureDate)
-  const { phase: phaseNumber, label: phaseLabel } = getPatientPhase(currentDay)
-  const weightLostPct = getWeightLostPercent(patient.weightStart, patient.weightCurrent, patient.weightGoal)
-  const weightLost = patient.weightStart - patient.weightCurrent
-
-  // Allergy state — in production saved/loaded from Firestore
-  const [medAllergyList, setMedAllergyList] = useState<string[]>(patient.allergiesMedications)
-  const [foodAllergyList, setFoodAllergyList] = useState<string[]>(patient.allergiesFoods)
+  // Allergy state
+  const [medAllergyList, setMedAllergyList] = useState<string[]>([])
+  const [foodAllergyList, setFoodAllergyList] = useState<string[]>([])
   const [newMedAllergy, setNewMedAllergy] = useState("")
   const [newFoodAllergy, setNewFoodAllergy] = useState("")
   const [editingMed, setEditingMed] = useState(false)
   const [editingFood, setEditingFood] = useState(false)
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      if (!user) {
+        setLoadingData(false)
+        return
+      }
+      try {
+        let fetchedPatient: Patient | null = null
+
+        // 1. Try loading patient via entityId in user profile
+        const userDoc = await getDoc(doc(db, "users", user.uid))
+        const userData = userDoc.exists() ? userDoc.data() : null
+        const entityId = userData?.entityId
+
+        if (entityId) {
+          const patientDoc = await getDoc(doc(db, "patients", entityId))
+          if (patientDoc.exists()) {
+            fetchedPatient = { id: patientDoc.id, ...patientDoc.data() } as Patient
+          }
+        }
+
+        // 2. Fallback: find patient record by email
+        if (!fetchedPatient && user.email) {
+          const q = query(collection(db, "patients"), where("email", "==", user.email))
+          const snap = await getDocs(q)
+          if (!snap.empty) {
+            const patientDoc = snap.docs[0]
+            fetchedPatient = { id: patientDoc.id, ...patientDoc.data() } as Patient
+          }
+        }
+
+        if (fetchedPatient) {
+          setPatient(fetchedPatient)
+          setMedAllergyList(fetchedPatient.allergiesMedications || [])
+          setFoodAllergyList(fetchedPatient.allergiesFoods || [])
+
+          // Fetch doctor
+          if (fetchedPatient.doctorId) {
+            const doctorDoc = await getDoc(doc(db, "doctors", fetchedPatient.doctorId))
+            if (doctorDoc.exists()) setDoctor({ id: doctorDoc.id, ...doctorDoc.data() } as Doctor)
+          }
+          // Fetch clinic
+          if (fetchedPatient.clinicId) {
+            const clinicDoc = await getDoc(doc(db, "clinics", fetchedPatient.clinicId))
+            if (clinicDoc.exists()) setClinic({ id: clinicDoc.id, ...clinicDoc.data() } as Clinic)
+          }
+        } else {
+          setError("No se encontraron tus datos de perfil.")
+        }
+      } catch (err: any) {
+        setError(`Error cargando datos: ${err.message}`)
+      } finally {
+        setLoadingData(false)
+      }
+    })
+    return () => unsubscribe()
+  }, [])
 
   const addMedAllergy = () => {
     const val = newMedAllergy.trim()
@@ -88,8 +144,40 @@ export default function PerfilPage() {
   }
 
   const handleLogout = () => {
-    alert("Cerrar sesión — integración pendiente con Firebase Auth")
+    auth.signOut()
   }
+
+  if (loadingData) {
+    return (
+      <ProtectedRoute allowedRoles={["paciente", "patient"]}>
+        <div className="flex min-h-screen items-center justify-center bg-background">
+          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        </div>
+      </ProtectedRoute>
+    )
+  }
+
+  if (error || !patient) {
+    return (
+      <ProtectedRoute allowedRoles={["paciente", "patient"]}>
+        <div className="flex min-h-screen flex-col items-center justify-center bg-background p-4 text-center">
+          <div className="rounded-full bg-destructive/10 p-3 mb-4">
+            <X className="h-6 w-6 text-destructive" />
+          </div>
+          <p className="text-muted-foreground">{error || "No se pudo cargar el perfil."}</p>
+          <Button className="mt-4" onClick={() => window.location.reload()}>
+            Reintentar
+          </Button>
+          <BottomNav />
+        </div>
+      </ProtectedRoute>
+    )
+  }
+
+  const currentDay = getDaysSinceProcedure(patient.procedureDate)
+  const { phase: phaseNumber, label: phaseLabel } = getPatientPhase(currentDay)
+  const weightLostPct = getWeightLostPercent(patient.weightStart, patient.weightCurrent, patient.weightGoal)
+  const weightLost = patient.weightStart - patient.weightCurrent
 
   return (
     <ProtectedRoute allowedRoles={["paciente", "patient"]}>

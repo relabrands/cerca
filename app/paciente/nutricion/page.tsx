@@ -1,12 +1,16 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { BottomNav } from "@/components/bottom-nav"
 import { PanicButton } from "@/components/panic-button"
-import { Sparkles, Clock, ChefHat, Loader2, Check, Utensils, ShoppingBag, Package, AlertTriangle } from "lucide-react"
+import { Sparkles, Clock, ChefHat, Loader2, Check, Utensils, ShoppingBag, Package, AlertTriangle, X } from "lucide-react"
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute"
+import { type Patient, getDaysSinceProcedure, getPatientPhase } from "@/lib/store"
+import { onAuthStateChanged } from "firebase/auth"
+import { doc, getDoc, collection, query, where, getDocs } from "firebase/firestore"
+import { auth, db } from "@/lib/firebase"
 
 interface Recipe {
   id: number
@@ -53,12 +57,6 @@ const phaseRecipes: Recipe[] = [
   },
 ]
 
-// Simulated user allergies — in production this comes from Firestore user profile
-const userAllergies = {
-  medications: ["Penicilina", "Ibuprofeno"],
-  foods: ["Mariscos", "Nueces", "Lácteos"],
-}
-
 const aiRecipes: Record<"economica" | "regular", Recipe> = {
   economica: {
     id: 101,
@@ -102,11 +100,60 @@ const aiRecipes: Record<"economica" | "regular", Recipe> = {
 type RecipeType = "economica" | "regular" | null
 
 export default function NutricionPage() {
+  const [patient, setPatient] = useState<Patient | null>(null)
+  const [loadingData, setLoadingData] = useState(true)
+  const [error, setError] = useState("")
+
   const [isGenerating, setIsGenerating] = useState(false)
   const [generatedRecipe, setGeneratedRecipe] = useState<Recipe | null>(null)
   const [expandedRecipe, setExpandedRecipe] = useState<number | null>(null)
   const [showTypeModal, setShowTypeModal] = useState(false)
   const [selectedType, setSelectedType] = useState<RecipeType>(null)
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      if (!user) {
+        setLoadingData(false)
+        return
+      }
+      try {
+        let fetchedPatient: Patient | null = null
+
+        // 1. Try loading patient via entityId in user profile
+        const userDoc = await getDoc(doc(db, "users", user.uid))
+        const userData = userDoc.exists() ? userDoc.data() : null
+        const entityId = userData?.entityId
+
+        if (entityId) {
+          const patientDoc = await getDoc(doc(db, "patients", entityId))
+          if (patientDoc.exists()) {
+            fetchedPatient = { id: patientDoc.id, ...patientDoc.data() } as Patient
+          }
+        }
+
+        // 2. Fallback: find patient record by email
+        if (!fetchedPatient && user.email) {
+          const q = query(collection(db, "patients"), where("email", "==", user.email))
+          const snap = await getDocs(q)
+          if (!snap.empty) {
+            const patientDoc = snap.docs[0]
+            fetchedPatient = { id: patientDoc.id, ...patientDoc.data() } as Patient
+          }
+        }
+
+        if (fetchedPatient) {
+          setPatient(fetchedPatient)
+        } else {
+          setError("No se encontraron tus datos de paciente.")
+        }
+      } catch (err: any) {
+        setError(`Error cargando datos: ${err.message}`)
+      } finally {
+        setLoadingData(false)
+      }
+    })
+    return () => unsubscribe()
+  }, [])
 
   const handleOpenTypeModal = () => {
     setSelectedType(null)
@@ -130,6 +177,39 @@ export default function NutricionPage() {
     setIsGenerating(false)
   }
 
+  if (loadingData) {
+    return (
+      <ProtectedRoute allowedRoles={["paciente", "patient"]}>
+        <div className="flex min-h-screen items-center justify-center bg-background">
+          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        </div>
+      </ProtectedRoute>
+    )
+  }
+
+  if (error || !patient) {
+    return (
+      <ProtectedRoute allowedRoles={["paciente", "patient"]}>
+        <div className="flex min-h-screen flex-col items-center justify-center bg-background p-4 text-center">
+          <div className="rounded-full bg-destructive/10 p-3 mb-4">
+            <X className="h-6 w-6 text-destructive" />
+          </div>
+          <p className="text-muted-foreground">{error || "No se pudo cargar el perfil."}</p>
+          <Button className="mt-4" onClick={() => window.location.reload()}>
+            Reintentar
+          </Button>
+          <BottomNav />
+        </div>
+      </ProtectedRoute>
+    )
+  }
+
+  const patientAllergiesFoods = patient.allergiesFoods || []
+  const patientAllergiesMedications = patient.allergiesMedications || []
+
+  const currentDay = getDaysSinceProcedure(patient.procedureDate)
+  const { phase: phaseNumber, label: phaseLabel } = getPatientPhase(currentDay)
+
   return (
     <ProtectedRoute allowedRoles={["paciente", "patient"]}>
       <main className="min-h-screen bg-background pb-24">
@@ -150,7 +230,7 @@ export default function NutricionPage() {
             <CardContent className="flex items-center justify-between p-4">
               <div>
                 <p className="text-xs font-medium text-primary">Fase actual</p>
-                <p className="font-semibold text-foreground">Fase 1: Dieta Líquida Estricta</p>
+                <p className="font-semibold text-foreground">Fase {phaseNumber}: {phaseLabel}</p>
               </div>
               <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10">
                 <Check className="h-5 w-5 text-primary" />
@@ -159,14 +239,14 @@ export default function NutricionPage() {
           </Card>
 
           {/* Allergy Alert Banner */}
-          {userAllergies.foods.length > 0 && (
+          {patientAllergiesFoods.length > 0 && (
             <Card className="border-amber-200 bg-amber-50">
               <CardContent className="flex items-start gap-3 p-4">
                 <AlertTriangle className="h-5 w-5 text-amber-600 mt-0.5 shrink-0" />
                 <div>
                   <p className="text-sm font-semibold text-amber-800">Alergias registradas</p>
                   <p className="text-xs text-amber-700 mt-0.5">
-                    Las recetas excluirán: <span className="font-medium">{userAllergies.foods.join(", ")}</span>
+                    Las recetas excluirán: <span className="font-medium">{patientAllergiesFoods.join(", ")}</span>
                   </p>
                 </div>
               </CardContent>

@@ -1,12 +1,12 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { BottomNav } from "@/components/bottom-nav"
 import { PanicButton } from "@/components/panic-button"
-import { TrendingDown, Scale, Activity, ChevronLeft, ChevronRight } from "lucide-react"
+import { TrendingDown, Scale, Activity, ChevronLeft, ChevronRight, Loader2, X } from "lucide-react"
 import {
   LineChart,
   Line,
@@ -16,12 +16,10 @@ import {
   ResponsiveContainer,
   Tooltip,
 } from "recharts"
-
-// Sample weight data - Replace with Firebase Firestore integration
-// import { collection, query, orderBy, getDocs } from "firebase/firestore"
-// const weightsRef = collection(db, "users", userId, "weights")
-// const q = query(weightsRef, orderBy("date", "desc"))
-// const querySnapshot = await getDocs(q)
+import { type Patient } from "@/lib/store"
+import { onAuthStateChanged } from "firebase/auth"
+import { doc, getDoc, collection, query, where, getDocs } from "firebase/firestore"
+import { auth, db } from "@/lib/firebase"
 
 const weightData = [
   { date: "1 Mar", weight: 95.0 },
@@ -46,26 +44,98 @@ const satietyLevels = [
 ]
 
 export default function ProgresoPage() {
+  const [patient, setPatient] = useState<Patient | null>(null)
+  const [loadingData, setLoadingData] = useState(true)
+  const [error, setError] = useState("")
+
   const [selectedSatiety, setSelectedSatiety] = useState<number | null>(null)
   const [satietyLogged, setSatietyLogged] = useState(false)
 
-  const startWeight = 95.0
-  const currentWeight = 93.2
-  const weightLost = startWeight - currentWeight
-  const goalWeight = 75.0
-  const progressPercent = ((startWeight - currentWeight) / (startWeight - goalWeight)) * 100
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      if (!user) {
+        setLoadingData(false)
+        return
+      }
+      try {
+        let fetchedPatient: Patient | null = null
+
+        // 1. Try loading patient via entityId in user profile
+        const userDoc = await getDoc(doc(db, "users", user.uid))
+        const userData = userDoc.exists() ? userDoc.data() : null
+        const entityId = userData?.entityId
+
+        if (entityId) {
+          const patientDoc = await getDoc(doc(db, "patients", entityId))
+          if (patientDoc.exists()) {
+            fetchedPatient = { id: patientDoc.id, ...patientDoc.data() } as Patient
+          }
+        }
+
+        // 2. Fallback: find patient record by email
+        if (!fetchedPatient && user.email) {
+          const q = query(collection(db, "patients"), where("email", "==", user.email))
+          const snap = await getDocs(q)
+          if (!snap.empty) {
+            const patientDoc = snap.docs[0]
+            fetchedPatient = { id: patientDoc.id, ...patientDoc.data() } as Patient
+          }
+        }
+
+        if (fetchedPatient) {
+          setPatient(fetchedPatient)
+        } else {
+          setError("No se encontraron tus datos de paciente.")
+        }
+      } catch (err: any) {
+        setError(`Error cargando datos: ${err.message}`)
+      } finally {
+        setLoadingData(false)
+      }
+    })
+    return () => unsubscribe()
+  }, [])
 
   const handleSatietyLog = () => {
     if (selectedSatiety) {
-      // Firebase Firestore integration placeholder
-      // import { addDoc, collection, serverTimestamp } from "firebase/firestore"
-      // await addDoc(collection(db, "users", userId, "satiety"), {
-      //   level: selectedSatiety,
-      //   timestamp: serverTimestamp()
-      // })
       setSatietyLogged(true)
     }
   }
+
+  if (loadingData) {
+    return (
+      <ProtectedRoute allowedRoles={["paciente", "patient"]}>
+        <div className="flex min-h-screen items-center justify-center bg-background">
+          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        </div>
+      </ProtectedRoute>
+    )
+  }
+
+  if (error || !patient) {
+    return (
+      <ProtectedRoute allowedRoles={["paciente", "patient"]}>
+        <div className="flex min-h-screen flex-col items-center justify-center bg-background p-4 text-center">
+          <div className="rounded-full bg-destructive/10 p-3 mb-4">
+            <X className="h-6 w-6 text-destructive" />
+          </div>
+          <p className="text-muted-foreground">{error || "No se pudo cargar el perfil."}</p>
+          <Button className="mt-4" onClick={() => window.location.reload()}>
+            Reintentar
+          </Button>
+          <BottomNav />
+        </div>
+      </ProtectedRoute>
+    )
+  }
+
+  const startWeight = patient.weightStart || 0
+  const currentWeight = patient.weightCurrent || 0
+  const weightLost = Math.max(0, startWeight - currentWeight)
+  const goalWeight = patient.weightGoal || 0
+  const progressPercent = startWeight !== goalWeight 
+    ? ((startWeight - currentWeight) / (startWeight - goalWeight)) * 100 
+    : 0
 
   return (
     <ProtectedRoute allowedRoles={["paciente", "patient"]}>

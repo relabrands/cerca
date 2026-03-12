@@ -49,7 +49,12 @@ service cloud.firestore {
     match /patients/{patientId} {
       allow read, write: if isAdmin();
       allow read, write: if isDoctor();
-      allow read, write: if isPatient() && resource.data.email == request.auth.token.email;
+      // Allow the patient to read their own doc if they know the ID, or list docs if they filter by their email
+      allow read: if isPatient() && (
+        (resource != null && resource.data.email == request.auth.token.email) ||
+        (request.resource != null && request.resource.data.email == request.auth.token.email)
+      );
+      allow write: if isPatient() && resource.data.email == request.auth.token.email;
     }
   }
 }

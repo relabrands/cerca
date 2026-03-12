@@ -1,10 +1,16 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { HeartPulse, X, Send } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { cn } from "@/lib/utils"
+// Need firebase auth to identify patient
+import { onAuthStateChanged } from "firebase/auth"
+import { doc, getDoc, collection, query, where, getDocs } from "firebase/firestore"
+import { auth, db } from "@/lib/firebase"
+import { type Patient } from "@/lib/store"
+import { toast } from "sonner"
 
 const quickTags = [
   { label: "Náuseas", emoji: "🤢" },
@@ -20,7 +26,9 @@ interface Message {
 }
 
 export function PanicButton() {
+  const [patient, setPatient] = useState<Patient | null>(null)
   const [isOpen, setIsOpen] = useState(false)
+  const [isSending, setIsSending] = useState(false)
   const [messages, setMessages] = useState<Message[]>([
     {
       id: 1,
@@ -30,31 +38,80 @@ export function PanicButton() {
   ])
   const [input, setInput] = useState("")
 
-  const handleTagClick = (tag: string) => {
+  useEffect(() => {
+    // Only fetch patient context once when opened
+    if (!isOpen) return;
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      if (!user) return
+      try {
+        let fetchedPatient = null
+        const userDoc = await getDoc(doc(db, "users", user.uid))
+        if (userDoc.exists() && userDoc.data().entityId) {
+          const pDoc = await getDoc(doc(db, "patients", userDoc.data().entityId))
+          if (pDoc.exists()) fetchedPatient = { id: pDoc.id, ...pDoc.data() } as Patient
+        }
+        if (!fetchedPatient && user.email) {
+          const q = query(collection(db, "patients"), where("email", "==", user.email))
+          const sq = await getDocs(q)
+          if (!sq.empty) fetchedPatient = { id: sq.docs[0].id, ...sq.docs[0].data() } as Patient
+        }
+        setPatient(fetchedPatient)
+      } catch (err) {
+        console.error("Error fetching patient for panic button", err)
+      }
+    })
+    return () => unsubscribe()
+  }, [isOpen])
+
+  const triggerPanicDb = async (reason: string) => {
+    if (!patient) return;
+    setIsSending(true)
+    try {
+      await fetch("/api/panic", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          patientId: patient.id,
+          patientName: patient.name,
+          doctorId: patient.doctorId,
+          reason
+        })
+      });
+    } catch(err) {
+      console.error(err)
+    } finally {
+      setIsSending(false)
+    }
+  }
+
+  const handleTagClick = async (tag: string) => {
     const userMessage: Message = {
       id: messages.length + 1,
       text: tag,
       isUser: true,
     }
     
-    // Simulated AI response based on symptom
+    setMessages(prev => [...prev, userMessage])
+    await triggerPanicDb(tag);
+
+    // Simulated response
     const responses: Record<string, string> = {
-      "Náuseas": "Entiendo que te sientes con náuseas. Esto es muy común en las primeras semanas. Te recomiendo: 1) Bebe pequeños sorbos de agua fría cada 15 minutos. 2) Respira profundamente. 3) Evita movimientos bruscos. Si persisten más de 2 horas, contacta a tu centro médico.",
-      "Ansiedad": "Es completamente normal sentir ansiedad durante este proceso. Recuerda: estás haciendo un gran cambio por tu salud. Intenta respirar profundamente 5 veces. Si necesitas hablar con alguien, tu centro médico está disponible para ti.",
-      "Reflujo": "El reflujo puede ser incómodo. Te sugiero: 1) No te acuestes inmediatamente después de comer. 2) Eleva la cabecera de tu cama. 3) Evita alimentos ácidos o picantes. Si el reflujo es severo, consulta con tu médico.",
-      "Dolor": "Lamento que sientas dolor. Si es un dolor leve o molestia, puede ser parte del proceso de adaptación. Sin embargo, si el dolor es intenso, persistente, o viene acompañado de fiebre, contacta inmediatamente a tu centro médico.",
+      "Náuseas": "Entiendo que te sientes con náuseas. Esto es muy común en las primeras semanas. Hemos avisado a tu doctor. Te recomiendo: 1) Bebe pequeños sorbos de agua fría cada 15 minutos. 2) Respira profundamente. 3) Evita movimientos bruscos.",
+      "Ansiedad": "Es completamente normal sentir ansiedad. Hemos notificado al doctor. Intenta respirar profundamente 5 veces. Si necesitas hablar con alguien, tu centro médico está disponible para ti.",
+      "Reflujo": "El reflujo puede ser incómodo. Hemos registrado tu alerta. Te sugiero: 1) No te acuestes inmediatamente después de comer. 2) Eleva la cabecera de tu cama. 3) Evita alimentos ácidos o picantes.",
+      "Dolor": "Lamento que sientas dolor. Hemos enviado inmediatamente una alerta a tu médico asignado. Si el dolor es intenso, por favor dirígete a urgencias.",
     }
 
     const aiMessage: Message = {
       id: messages.length + 2,
-      text: responses[tag] || "Gracias por compartir cómo te sientes. ¿Puedes describir más tu síntoma para poder ayudarte mejor?",
+      text: responses[tag] || "Gracias por compartir cómo te sientes. Hemos notificado a tu doctor.",
       isUser: false,
     }
 
-    setMessages([...messages, userMessage, aiMessage])
+    setMessages(prev => [...prev, aiMessage])
   }
 
-  const handleSend = () => {
+  const handleSend = async () => {
     if (!input.trim()) return
 
     const userMessage: Message = {
@@ -62,15 +119,19 @@ export function PanicButton() {
       text: input,
       isUser: true,
     }
+    
+    setMessages(prev => [...prev, userMessage])
+    setInput("")
+    
+    await triggerPanicDb(input);
 
     const aiMessage: Message = {
       id: messages.length + 2,
-      text: "Gracias por compartir cómo te sientes. Recuerda que los primeros días pueden ser desafiantes, pero cada día que pasa tu cuerpo se adapta mejor. Si tus síntomas persisten o empeoran, no dudes en contactar a tu centro médico.",
+      text: "Hemos registrado tu mensaje de alerta y lo enviaremos a tu doctor. Si es una emergencia grave, por favor acude al hospital más cercano.",
       isUser: false,
     }
 
-    setMessages([...messages, userMessage, aiMessage])
-    setInput("")
+    setMessages(prev => [...prev, aiMessage])
   }
 
   return (

@@ -141,7 +141,9 @@ function SuperAdminContent() {
       }
 
       if (!response.ok) {
-        throw new Error(data.error || "Error creando doctor")
+        const errorMsg = data.error || "Error creando doctor";
+        const details = data.details ? ` (${data.details})` : "";
+        throw new Error(errorMsg + details);
       }
 
       // El backend ya lo guardó en Firestore con un entityId

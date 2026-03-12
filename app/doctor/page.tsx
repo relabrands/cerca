@@ -257,7 +257,9 @@ function DoctorContent() {
       }
 
       if (!response.ok) {
-        throw new Error(responseData.error || "Error creando paciente")
+        const errorMsg = responseData.error || "Error creando paciente";
+        const details = responseData.details ? ` (${responseData.details})` : "";
+        throw new Error(errorMsg + details);
       }
 
       // Backend created it successfully and returned entityId

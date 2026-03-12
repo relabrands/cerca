@@ -3,22 +3,22 @@ import admin from "firebase-admin";
 import { Resend } from "resend";
 
 export async function POST(req: Request) {
-  if (!admin.apps.length) {
-    admin.initializeApp({
-      credential: admin.credential.cert({
-        projectId: process.env.FIREBASE_PROJECT_ID,
-        clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-        privateKey: (process.env.FIREBASE_PRIVATE_KEY || "").replace(/\\n/g, "\n"),
-      }),
-    });
-  }
-
-  const db = admin.firestore();
-  const auth = admin.auth();
-  const resend = new Resend(process.env.RESEND_API_KEY!);
-
   try {
+    if (!admin.apps.length) {
+      admin.initializeApp({
+        credential: admin.credential.cert({
+          projectId: process.env.FIREBASE_PROJECT_ID,
+          clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+          // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+          privateKey: (process.env.FIREBASE_PRIVATE_KEY || "").replace(/\\n/g, "\n"),
+        }),
+      });
+    }
+
+    const db = admin.firestore();
+    const auth = admin.auth();
+    const resend = new Resend(process.env.RESEND_API_KEY!);
+
     const body = await req.json();
     const { email, password, name, role, ...profileData } = body;
 

@@ -248,7 +248,14 @@ function DoctorContent() {
         }),
       })
 
-      const responseData = await response.json()
+      const textRes = await response.text()
+      let responseData
+      try {
+        responseData = JSON.parse(textRes)
+      } catch (parseError) {
+        throw new Error(`Error crítico del servidor: ${textRes.slice(0, 60)}...`)
+      }
+
       if (!response.ok) {
         throw new Error(responseData.error || "Error creando paciente")
       }

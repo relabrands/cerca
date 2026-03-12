@@ -132,7 +132,14 @@ function SuperAdminContent() {
         }),
       })
 
-      const data = await response.json()
+      const textRes = await response.text()
+      let data
+      try {
+        data = JSON.parse(textRes)
+      } catch (parseError) {
+        throw new Error(`Error crítico del servidor: ${textRes.slice(0, 60)}...`)
+      }
+
       if (!response.ok) {
         throw new Error(data.error || "Error creando doctor")
       }

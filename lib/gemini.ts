@@ -1,32 +1,23 @@
-import { GoogleAuth } from "google-auth-library";
 import { GoogleGenAI } from "@google/genai";
 
 /**
- * Returns a Vertex-AI backed GoogleGenAI client.
- * Called lazily inside API route handlers so env vars are available at
- * request time (not at build/SSG collection time).
+ * Returns a Gemini AI client using the GEMINI_API_KEY environment variable.
+ * Initialized lazily inside route handlers so the env var is read at request
+ * time, not at build/SSG time.
+ *
+ * Get a free API key at: https://aistudio.google.com/app/apikey
+ * Add it to Vercel as environment variable: GEMINI_API_KEY
  */
 export function getAI(): GoogleGenAI {
-  const privateKey = (process.env.FIREBASE_PRIVATE_KEY || "")
-    .replace(/^"|"$/g, "")
-    .replace(/\\n/g, "\n");
-
-  const googleAuth = new GoogleAuth({
-    credentials: {
-      client_email: process.env.FIREBASE_CLIENT_EMAIL,
-      private_key: privateKey,
-    },
-    projectId: process.env.FIREBASE_PROJECT_ID,
-    scopes: ["https://www.googleapis.com/auth/cloud-platform"],
-  });
-
-  return new GoogleGenAI({
-    vertexai: true,
-    project: process.env.FIREBASE_PROJECT_ID,
-    location: "us-central1",
-    // @ts-expect-error – the SDK accepts a GoogleAuth instance via this field
-    googleAuth,
-  });
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    throw new Error(
+      "Missing GEMINI_API_KEY environment variable. " +
+        "Get a free key at https://aistudio.google.com/app/apikey and add it to Vercel."
+    );
+  }
+  return new GoogleGenAI({ apiKey });
 }
+
 
 

@@ -19,7 +19,7 @@ service cloud.firestore {
     }
 
     function isPatient() {
-      return isAuth() && getUserData().role == 'paciente';
+      return isAuth() && (getUserData().role == 'paciente' || getUserData().role == 'patient');
     }
 
     // ----------- users collection -----------

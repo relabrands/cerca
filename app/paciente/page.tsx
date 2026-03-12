@@ -126,10 +126,19 @@ function PatientContent() {
     )
   }
 
-  const currentDay = getDaysSinceProcedure(patient.procedureDate)
+  const actualDay = getDaysSinceProcedure(patient.procedureDate)
   const totalDays = patient.balloonDurationDays
+  const treatmentDone = actualDay >= totalDays
+  const currentDay = treatmentDone ? totalDays : actualDay
   const { phase: phaseNumber, label: currentPhase } = getPatientPhase(currentDay)
   const progressPct = Math.min((currentDay / totalDays) * 100, 100)
+
+  const completionDate = (() => {
+    if (!patient.procedureDate) return ""
+    const d = new Date(patient.procedureDate + "T00:00:00")
+    d.setDate(d.getDate() + totalDays)
+    return d.toLocaleDateString("es-DO", { day: "numeric", month: "long", year: "numeric" })
+  })()
 
   return (
     <main className="min-h-screen bg-background pb-24">
@@ -152,10 +161,17 @@ function PatientContent() {
                   <Calendar className="h-5 w-5 text-primary" />
                   <span className="text-sm font-medium text-muted-foreground">Tu progreso</span>
                 </div>
-                <p className="mt-2 text-4xl font-bold text-foreground">
-                  Día {currentDay}{" "}
-                  <span className="text-lg font-normal text-muted-foreground">de {totalDays}</span>
-                </p>
+                {treatmentDone ? (
+                  <>
+                    <p className="mt-2 text-3xl font-bold text-foreground">¡Completado!</p>
+                    <p className="text-sm text-muted-foreground mt-0.5">{completionDate}</p>
+                  </>
+                ) : (
+                  <p className="mt-2 text-4xl font-bold text-foreground">
+                    Día {currentDay}{" "}
+                    <span className="text-lg font-normal text-muted-foreground">de {totalDays}</span>
+                  </p>
+                )}
                 <span className="mt-2 inline-block rounded-full bg-primary/10 px-3 py-0.5 text-xs font-medium text-primary">
                   {patient.balloonType}
                 </span>
@@ -170,7 +186,7 @@ function PatientContent() {
                     d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"
                     fill="none" stroke="currentColor" strokeWidth="3"
                     strokeDasharray={`${progressPct}, 100`}
-                    strokeLinecap="round" className="text-primary"
+                    strokeLinecap="round" className={treatmentDone ? "text-green-500" : "text-primary"}
                   />
                 </svg>
               </div>

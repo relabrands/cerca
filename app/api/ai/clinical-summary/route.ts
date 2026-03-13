@@ -26,8 +26,8 @@ export async function POST(req: Request) {
     
     const dailyLogs = dailyLogsSnap.docs.map(doc => ({
       date: doc.id,
-      ...doc.data()
-    }));
+      ...(doc.data() as any)
+    })) as any[];
 
     // Get weight logs
     const weightLogsSnap = await adminDb
@@ -63,7 +63,7 @@ DATOS DEL PACIENTE:
 
 ACTIVIDAD DE LA ÚLTIMA SEMANA:
 - Registros diarios encontrados: ${dailyLogs.length} de 7 días.
-- Promedio Hidratación: ${dailyLogs.reduce((acc, log) => acc + (log.hydration_ml || 0), 0) / (dailyLogs.length || 1)}ml/día.
+- Promedio Hidratación: ${dailyLogs.reduce((acc: number, log: any) => acc + (log.hydration_ml || 0), 0) / (dailyLogs.length || 1)}ml/día.
 - Alertas de Pánico: ${alertsCount} en la última semana.
 - Registros de peso: ${weightLogs.length} en la última semana.
 

@@ -387,7 +387,7 @@ function DoctorContent() {
   }
 
   // ── Edit patient ──────────────────────────────────────────────────────────
-  const openEditModal = (patient: Patient) => {
+  const openEditModal = (patient: PatientWithTriage) => {
     setEditingPatient(patient)
     setEditForm({
       name: patient.name,
@@ -396,7 +396,7 @@ function DoctorContent() {
       phone: patient.phone || "",
       dateOfBirth: patient.dateOfBirth || "",
       procedureDate: patient.procedureDate || "",
-      balloonType: patient.balloonType || "",
+      balloonType: patient.balloonType as BalloonType | "",
       balloonDurationDays: patient.balloonDurationDays || 180,
       // Store as lbs for the form
       weightStart: patient.weightStart ? String(kgToLbs(patient.weightStart)) : "",

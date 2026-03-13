@@ -4,7 +4,7 @@ import { useState, useEffect } from "react"
 import { onAuthStateChanged, signOut } from "firebase/auth"
 import {
   doc, getDoc, collection, query, where, getDocs,
-  addDoc, updateDoc
+  addDoc, updateDoc, orderBy, limit
 } from "firebase/firestore"
 import { auth, db } from "@/lib/firebase"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -13,13 +13,14 @@ import { Input } from "@/components/ui/input"
 import {
   User, Users, Plus, X, Check, ChevronRight, Calendar, Target, Activity,
   AlertTriangle, Pill, Leaf, ArrowLeft, Scale, Clock, Stethoscope, Loader2,
-  Home, Phone, Mail, Edit2, LogOut, Building2,
+  Home, Phone, Mail, Edit2, LogOut, Building2, AlertCircle, Info, Sparkles
 } from "lucide-react"
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute"
 import {
-  getDaysSinceProcedure, getPatientPhase, getWeightLostPercent,
+  getDaysSinceProcedure, getPatientPhase, getWeightLostPercent, getTodayKeyDR,
   type BalloonType, type Patient, type Doctor,
 } from "@/lib/store"
+import { differenceInCalendarDays, parseISO } from "date-fns"
 
 // ─── Weight conversion helpers ───────────────────────────────────────────────
 const lbsToKg = (lbs: number) => Math.round(lbs * 0.453592 * 10) / 10
@@ -58,13 +59,21 @@ const BALLOON_TYPES: { type: BalloonType; days: number }[] = [
   { type: "Spatz3 (12 meses)", days: 365 },
   { type: "Elipse (4 meses)", days: 120 },
 ]
-
 const emptyForm = {
   name: "", email: "", password: "", phone: "", dateOfBirth: "", procedureDate: "",
-  balloonType: "", balloonDurationDays: 180,
+  balloonType: "" as BalloonType | "", balloonDurationDays: 180,
   weightStart: "", weightGoal: "", weightCurrent: "",
   allergiesMedications: [] as string[], allergiesFoods: [] as string[],
   newMedAllergy: "", newFoodAllergy: "",
+}
+
+type TriageLevel = "red" | "yellow" | "green"
+
+interface PatientWithTriage extends Patient {
+  triage: TriageLevel
+  recentAlerts: number
+  lastWeightDate?: string
+  todayHydration: number
 }
 
 type Tab = "inicio" | "pacientes" | "perfil"
@@ -72,9 +81,11 @@ type Tab = "inicio" | "pacientes" | "perfil"
 // ─── Main component ───────────────────────────────────────────────────────────
 function DoctorContent() {
   const [doctor, setDoctor] = useState<Doctor | null>(null)
-  const [patientList, setPatientList] = useState<Patient[]>([])
+  const [patientList, setPatientList] = useState<PatientWithTriage[]>([])
   const [loadingData, setLoadingData] = useState(true)
   const [error, setError] = useState("")
+  const [clinicalSummary, setClinicalSummary] = useState<string | null>(null)
+  const [loadingSummary, setLoadingSummary] = useState(false)
 
   // Tab navigation
   const [tab, setTab] = useState<Tab>("inicio")
@@ -86,7 +97,7 @@ function DoctorContent() {
   const [balloonForm, setBalloonForm] = useState({ name: "", durationDays: "" })
 
   // Patient detail / list
-  const [selectedPatient, setSelectedPatient] = useState<Patient | null>(null)
+  const [selectedPatient, setSelectedPatient] = useState<PatientWithTriage | null>(null)
 
   // Add patient modal
   const [showAddModal, setShowAddModal] = useState(false)
@@ -95,7 +106,7 @@ function DoctorContent() {
   const [savingPatient, setSavingPatient] = useState(false)
 
   // Edit patient modal
-  const [editingPatient, setEditingPatient] = useState<Patient | null>(null)
+  const [editingPatient, setEditingPatient] = useState<PatientWithTriage | null>(null)
   const [editForm, setEditForm] = useState(emptyForm)
   const [editSuccess, setEditSuccess] = useState(false)
   const [savingEdit, setSavingEdit] = useState(false)
@@ -123,7 +134,55 @@ function DoctorContent() {
 
         const patientsQ = query(collection(db, "patients"), where("doctorId", "==", entityId))
         const patientsSnap = await getDocs(patientsQ)
-        setPatientList(patientsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Patient)))
+        const rawPatients = patientsSnap.docs.map(d => ({ id: d.id, ...d.data() } as Patient))
+
+        // Calculate Triage for each patient
+        const patientsWithTriage: PatientWithTriage[] = await Promise.all(
+          rawPatients.map(async (p) => {
+            const today = getTodayKeyDR()
+            
+            // 1. Check today's hydration
+            const logSnap = await getDoc(doc(db, "patients", p.id, "dailyLogs", today))
+            const todayHydration = logSnap.exists() ? logSnap.data().hydration_ml || 0 : 0
+
+            // 2. Check recent alerts (last 3 days)
+            const threeDaysAgo = new Date()
+            threeDaysAgo.setDate(threeDaysAgo.getDate() - 3)
+            const alertsQ = query(
+              collection(db, "alerts"), 
+              where("patientId", "==", p.id), 
+              where("createdAt", ">=", threeDaysAgo)
+            )
+            const alertsSnap = await getDocs(alertsQ)
+            const recentAlerts = alertsSnap.size
+
+            // 3. Check last weight date
+            const weightQ = query(
+              collection(db, "patients", p.id, "weightLogs"),
+              orderBy("date", "desc"),
+              limit(1)
+            )
+            const weightSnap = await getDocs(weightQ)
+            const lastWeightDate = !weightSnap.empty ? weightSnap.docs[0].data().date : p.procedureDate
+
+            // Triage Logic
+            let triage: TriageLevel = "green"
+            
+            // RED: Panic alerts OR 0 hydration today
+            if (recentAlerts > 0 || (todayHydration === 0)) {
+              triage = "red"
+            } 
+            // YELLOW: No weight log in > 7 days
+            else if (lastWeightDate) {
+              const daysSinceWeight = differenceInCalendarDays(parseISO(today), parseISO(lastWeightDate))
+              if (daysSinceWeight >= 7) triage = "yellow"
+            }
+
+            return { ...p, triage, recentAlerts, lastWeightDate, todayHydration }
+          })
+        )
+
+        setPatientList(patientsWithTriage)
       } catch (err: any) {
         setError(`Error cargando datos: ${err.message}`)
       } finally {
@@ -132,6 +191,39 @@ function DoctorContent() {
     })
     return () => unsubscribe()
   }, [])
+
+  // ── Clinical Summary ──────────────────────────────────────────────────────
+  const generateClinicalSummary = async () => {
+    if (!selectedPatient) return
+    setLoadingSummary(true)
+    setClinicalSummary(null)
+    try {
+      const actualDay = getDaysSinceProcedure(selectedPatient.procedureDate)
+      const phase = getPatientPhase(actualDay)
+      
+      const response = await fetch("/api/ai/clinical-summary", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          patientId: selectedPatient.id,
+          patientName: selectedPatient.name,
+          phase: `Fase ${phase.phase}: ${phase.label}`,
+          weightStart: selectedPatient.weightStart,
+          weightGoal: selectedPatient.weightGoal,
+        }),
+      })
+      const data = await response.json()
+      if (data.summary) {
+        setClinicalSummary(data.summary)
+      } else {
+        throw new Error(data.error || "Error al generar el resumen")
+      }
+    } catch (err: any) {
+      alert(`Error IA: ${err.message}`)
+    } finally {
+      setLoadingSummary(false)
+    }
+  }
 
   // ── Form helpers ─────────────────────────────────────────────────────────
   const updateForm = (key: keyof typeof form, value: unknown) =>
@@ -263,14 +355,14 @@ function DoctorContent() {
       }
 
       // Backend created it successfully and returned entityId
-      const newPatient: Patient = {
+      const newPatient: PatientWithTriage = {
         id: responseData.entityId,
         name: form.name.trim(),
         email: form.email.trim(),
         phone: form.phone.trim(),
         dateOfBirth: form.dateOfBirth,
         procedureDate: form.procedureDate,
-        balloonType: form.balloonType,
+        balloonType: form.balloonType as BalloonType,
         balloonDurationDays: form.balloonDurationDays,
         weightStart: lbsToKg(parseFloat(form.weightStart) || 0),
         weightGoal: lbsToKg(parseFloat(form.weightGoal) || 0),
@@ -279,6 +371,9 @@ function DoctorContent() {
         clinicId: doctor.clinicId,
         allergiesMedications: finalMedAllergies,
         allergiesFoods: finalFoodAllergies,
+        triage: "green", // Initial state
+        recentAlerts: 0,
+        todayHydration: 0,
       }
 
       setPatientList(prev => [...prev, newPatient])
@@ -339,8 +434,8 @@ function DoctorContent() {
         updatedAt: new Date(),
       }
       await updateDoc(doc(db, "patients", editingPatient.id), updates)
-      setPatientList(prev => prev.map(p => p.id === editingPatient.id ? { ...p, ...updates } : p))
-      if (selectedPatient?.id === editingPatient.id) setSelectedPatient(prev => prev ? { ...prev, ...updates } : prev)
+      setPatientList(prev => prev.map(p => p.id === editingPatient.id ? { ...p, ...updates } as PatientWithTriage : p))
+      if (selectedPatient?.id === editingPatient.id) setSelectedPatient(prev => prev ? { ...prev, ...updates } as PatientWithTriage : prev)
       setEditSuccess(true)
       setTimeout(() => { setEditSuccess(false); setEditingPatient(null) }, 1400)
     } catch (err: any) {
@@ -403,21 +498,90 @@ function DoctorContent() {
                 </div>
                 <div>
                   <h1 className="text-xl font-bold text-sidebar-foreground">{selectedPatient.name}</h1>
-                  <p className="text-sm text-sidebar-foreground/70">{selectedPatient.email}</p>
+                  <div className="flex items-center gap-2 mt-0.5">
+                    <p className="text-sm text-sidebar-foreground/70">{selectedPatient.email}</p>
+                    <span className={`h-2 w-2 rounded-full ${
+                      selectedPatient.triage === "red" ? "bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.8)]" :
+                      selectedPatient.triage === "yellow" ? "bg-amber-400" :
+                      "bg-green-500"
+                    }`} />
+                  </div>
                 </div>
               </div>
-              <button
-                onClick={() => openEditModal(selectedPatient)}
-                className="flex items-center gap-1.5 rounded-xl bg-white/15 hover:bg-white/25 transition-colors px-3 py-1.5 text-sm font-medium text-sidebar-foreground"
-              >
-                <Edit2 className="h-4 w-4" />
-                Editar
-              </button>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => openEditModal(selectedPatient)}
+                  className="flex items-center gap-1.5 rounded-xl bg-white/10 hover:bg-white/20 transition-colors px-3 py-1.5 text-xs font-medium text-sidebar-foreground border border-white/10"
+                >
+                  <Edit2 className="h-3.5 w-3.5" />
+                  Editar
+                </button>
+              </div>
             </div>
+            {selectedPatient.triage !== "green" && (
+              <div className={`mt-4 flex items-center gap-2 rounded-xl border p-3 text-xs font-medium animate-in fade-in slide-in-from-top-2 ${
+                selectedPatient.triage === "red" 
+                  ? "bg-red-500/10 border-red-500/20 text-red-200" 
+                  : "bg-amber-500/10 border-amber-500/20 text-amber-200"
+              }`}>
+                <AlertCircle className="h-4 w-4 shrink-0" />
+                <span>
+                  {selectedPatient.triage === "red" 
+                    ? "Atención prioritaria: Alertas de pánico recientes o falta de hidratación." 
+                    : "Seguimiento requerido: Sin registro de peso en más de 7 días."}
+                </span>
+              </div>
+            )}
           </div>
         </header>
 
         <div className="mx-auto max-w-lg px-4 -mt-4 space-y-4">
+          {/* AI Clinical Summary Button */}
+          <Card className="border-0 shadow-lg bg-gradient-to-br from-indigo-500/5 to-primary/5 border border-primary/10 overflow-hidden">
+            <CardContent className="p-0">
+              <div className="p-4 flex items-center justify-between gap-4">
+                <div className="flex items-center gap-3">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                    <Sparkles className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold text-foreground">Resumen Gemini (IA)</h3>
+                    <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Generar análisis clínico semanal</p>
+                  </div>
+                </div>
+                {!clinicalSummary && (
+                  <Button 
+                    size="sm" 
+                    onClick={generateClinicalSummary} 
+                    disabled={loadingSummary}
+                    className="h-8 rounded-lg shadow-sm"
+                  >
+                    {loadingSummary ? (
+                      <><Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> Generando</>
+                    ) : (
+                      "Generar"
+                    )}
+                  </Button>
+                )}
+              </div>
+              
+              {clinicalSummary && (
+                <div className="px-4 pb-4 pt-0 animate-in fade-in slide-in-from-top-2">
+                  <div className="rounded-xl bg-white/50 dark:bg-black/20 p-4 border border-primary/5 text-sm leading-relaxed text-foreground/90 italic">
+                    <div className="flex gap-2 mb-2">
+                      <div className="h-1.5 w-1.5 rounded-full bg-primary mt-2 flex-shrink-0" />
+                      <p>{clinicalSummary}</p>
+                    </div>
+                    <div className="flex justify-end pt-2">
+                      <Button variant="ghost" size="sm" className="h-6 text-[10px] text-muted-foreground hover:text-primary" onClick={generateClinicalSummary} disabled={loadingSummary}>
+                        <Clock className="h-3 w-3 mr-1" /> Regenerar
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
           {/* Day counter */}
           <Card className="border-0 shadow-lg">
             <CardContent className="p-5">
@@ -640,9 +804,16 @@ function DoctorContent() {
                   <div className="flex items-center gap-2 shrink-0">
                     <div className="text-right">
                       <p className="text-sm font-bold text-foreground">{done ? "Completo" : `Día ${day}`}</p>
-                      <span className={`text-xs font-medium ${done ? "text-muted-foreground" : "text-primary"}`}>
-                        {done ? "Finalizado" : `Fase ${phase.phase}`}
-                      </span>
+                      <div className="flex items-center justify-end gap-1.5">
+                        <span className={`h-1.5 w-1.5 rounded-full ${
+                          patient.triage === "red" ? "bg-red-500 shadow-[0_0_5px_rgba(239,68,68,0.7)]" :
+                          patient.triage === "yellow" ? "bg-amber-400" :
+                          "bg-green-500"
+                        }`} />
+                        <span className={`text-[10px] font-medium uppercase tracking-tight ${done ? "text-muted-foreground" : "text-primary"}`}>
+                          {done ? "Finalizado" : `Fase ${phase.phase}`}
+                        </span>
+                      </div>
                     </div>
                     <ChevronRight className="h-4 w-4 text-muted-foreground" />
                   </div>
@@ -673,11 +844,38 @@ function DoctorContent() {
               Agregar
             </button>
           </div>
-          <p className="text-sm text-sidebar-foreground/70 mt-1">{patientList.length} paciente{patientList.length !== 1 ? "s" : ""} registrado{patientList.length !== 1 ? "s" : ""}</p>
+          <div className="flex items-center justify-between mt-3">
+            <p className="text-xs text-sidebar-foreground/60">{patientList.length} registrados</p>
+            <div className="flex gap-1.5">
+              {["red", "yellow", "green"].map(level => {
+                const count = patientList.filter(p => p.triage === level).length
+                if (count === 0) return null
+                return (
+                  <div key={level} className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold border ${
+                    level === "red" ? "bg-red-500/20 border-red-500/40 text-red-100" :
+                    level === "yellow" ? "bg-amber-500/20 border-amber-500/40 text-amber-100" :
+                    "bg-green-500/20 border-green-500/40 text-green-100"
+                  }`}>
+                    <span className={`h-1.5 w-1.5 rounded-full ${
+                      level === "red" ? "bg-red-500" : level === "yellow" ? "bg-amber-400" : "bg-green-500"
+                    }`} />
+                    {count}
+                  </div>
+                )
+              })}
+            </div>
+          </div>
         </div>
       </header>
 
       <div className="mx-auto max-w-lg px-4 -mt-4 space-y-3">
+        {/* Priority Filter Hint */}
+        {patientList.some(p => p.triage === "red") && (
+          <div className="flex items-center gap-2 rounded-xl bg-red-500/5 border border-red-500/10 p-3 text-xs text-red-600 dark:text-red-400">
+            <AlertTriangle className="h-4 w-4" />
+            <p className="font-semibold">Tienes pacientes en riesgo que requieren atención hoy.</p>
+          </div>
+        )}
         {patientList.length === 0 && (
           <p className="text-sm text-muted-foreground text-center py-8">No tienes pacientes aún. ¡Agrega tu primer paciente!</p>
         )}
@@ -690,8 +888,13 @@ function DoctorContent() {
               <CardContent className="p-4">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3 min-w-0">
-                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary/10">
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 relative">
                       <User className="h-5 w-5 text-primary" />
+                      <span className={`absolute -top-1 -right-1 h-3 w-3 rounded-full border-2 border-white dark:border-gray-900 ${
+                        patient.triage === "red" ? "bg-red-500" :
+                        patient.triage === "yellow" ? "bg-amber-400" :
+                        "bg-green-500"
+                      }`} />
                     </div>
                     <div className="min-w-0">
                       <p className="font-semibold text-foreground truncate">{patient.name}</p>
@@ -704,7 +907,11 @@ function DoctorContent() {
                         {done ? "Completo" : `Día ${day}`}
                         {!done && <span className="text-xs font-normal text-muted-foreground">/{patient.balloonDurationDays}</span>}
                       </p>
-                      <span className={`text-xs font-medium ${done ? "text-muted-foreground" : "text-primary"}`}>
+                      <span className={`text-[10px] font-bold uppercase tracking-tight ${
+                        patient.triage === "red" ? "text-red-500" :
+                        patient.triage === "yellow" ? "text-amber-500" :
+                        done ? "text-muted-foreground" : "text-primary"
+                      }`}>
                         {done ? "Finalizado" : `Fase ${phase.phase}`}
                       </span>
                     </div>

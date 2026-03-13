@@ -293,38 +293,46 @@ export default function NutricionPage() {
                 )}
               </Button>
 
-              {/* Generated Recipe */}
+              {/* Generated Recipe — shown as a compact card matching phase card style */}
               {generatedRecipe && (
-                <div className="mt-4 rounded-xl border border-primary/20 bg-primary/5 p-4">
-                  <div className="flex items-start justify-between mb-2">
-                    <p className="font-semibold text-foreground pr-2">{generatedRecipe.name}</p>
-                    <span
-                      className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${
-                        generatedRecipe.type === "economica"
-                          ? "bg-amber-100 text-amber-700"
-                          : "bg-primary/10 text-primary"
-                      }`}
-                    >
-                      {generatedRecipe.type === "economica" ? "Económica" : "Regular"}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-2 text-xs text-muted-foreground mb-3">
-                    <Clock className="h-3 w-3" />
-                    <span>{generatedRecipe.prepTime}</span>
-                    <span>•</span>
-                    <span>{generatedRecipe.calories} kcal</span>
-                    <span>•</span>
-                    <span>{generatedRecipe.protein}g proteína</span>
-                  </div>
-                  <p className="text-xs font-medium text-foreground mb-1">Ingredientes:</p>
-                  <ul className="text-xs text-muted-foreground space-y-0.5 mb-3">
-                    {generatedRecipe.ingredients.map((ing, i) => (
-                      <li key={i}>• {ing}</li>
-                    ))}
-                  </ul>
-                  <p className="text-xs font-medium text-foreground mb-1">Preparación:</p>
-                  <p className="text-xs text-muted-foreground">{generatedRecipe.instructions}</p>
-                </div>
+                <Card
+                  className="mt-4 border-0 shadow-md cursor-pointer transition-all hover:shadow-lg"
+                  onClick={() => setExpandedRecipe(expandedRecipe === 999 ? null : 999)}
+                >
+                  <CardContent className="p-4">
+                    <div className="flex items-start justify-between">
+                      <div className="flex-1 pr-2">
+                        <p className="font-semibold text-foreground">{generatedRecipe.name}</p>
+                        <div className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
+                          <Clock className="h-3 w-3" />
+                          <span>{generatedRecipe.prepTime}</span>
+                          <span>•</span>
+                          <span>{generatedRecipe.calories} kcal</span>
+                          <span>•</span>
+                          <span>{generatedRecipe.protein}g proteína</span>
+                        </div>
+                      </div>
+                      <span className="shrink-0 rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
+                        ✨ IA
+                      </span>
+                    </div>
+
+                    {expandedRecipe === 999 && (
+                      <div className="mt-4 border-t border-border pt-4">
+                        <p className="text-xs font-medium text-foreground mb-1">Ingredientes:</p>
+                        <ul className="text-xs text-muted-foreground space-y-0.5">
+                          {generatedRecipe.ingredients.map((ing: string, i: number) => (
+                            <li key={i}>• {ing}</li>
+                          ))}
+                        </ul>
+                        <div className="mt-3">
+                          <p className="text-xs font-medium text-foreground mb-1">Preparación:</p>
+                          <p className="text-xs text-muted-foreground">{generatedRecipe.instructions}</p>
+                        </div>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
               )}
             </CardContent>
           </Card>

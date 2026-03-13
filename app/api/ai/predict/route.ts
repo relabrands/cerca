@@ -4,26 +4,29 @@ import { getAI } from "@/lib/gemini";
 export async function POST(req: Request) {
   try {
     const ai = getAI();
-    const { phase, weightStart, weightCurrent, allergies } = await req.json();
+    const { phase, currentDay, weightStart, weightCurrent, allergies } = await req.json();
 
-    const prompt = `Eres un coach nutricional experto ayudando a un paciente que se ha colocado un balón gástrico.
-Actualmente se encuentra en la Fase ${phase} de su recuperación.
-Su peso inicial fue ${weightStart}kg y su peso actual es ${weightCurrent}kg.
-Sus alergias alimentarias o medicamentosas son: ${allergies ? allergies.join(", ") : "Ninguna"}.
+    const prompt = `Eres un coach nutricional experto en pacientes con balón gástrico.
+El paciente está en el DÍA ${currentDay ?? 1} post-colocación del balón, que corresponde a la Fase ${phase}.
+Su peso inicial fue ${weightStart}kg y ahora pesa ${weightCurrent}kg.
+Alergias/restricciones: ${allergies?.length ? allergies.join(", ") : "Ninguna"}.
 
-Genera UN SOLO CONSEJO corto, directo y motivacional para el día de hoy (máximo 2 oraciones).
-Debe estar estrictamente adaptado a la Fase ${phase} y no sugerir NINGÚN ALIMENTO O HÁBITO QUE INVOLUCRE SUS ALERGIAS.
-El tono debe ser amigable y alentador.`;
+Tu tarea: Genera UN MENSAJE CORTO (máximo 2 oraciones) personalizado para HOY (día ${currentDay ?? 1}).
+- Menciona brevemente qué síntomas o sensaciones son NORMALES esperar en este día específico.
+- Incluye UN consejo práctico muy concreto para manejar ese día.
+- No menciones alimentos que involucren sus alergias.
+- Tono amigable, empático y alentador. Sin listas, solo texto corrido.
+
+Ejemplo del tipo de respuesta esperada (NO copies esto, genera uno original):
+"En el día 3 es normal sentir náuseas leves cuando te mueves rápido — toma sorbos pequeños de agua fría cada 15 minutos y descansa. ¡Tu cuerpo ya está adaptándose!"`;
 
     const response = await ai.models.generateContent({
       model: "gemini-2.5-flash",
       contents: prompt,
-      config: {
-        temperature: 0.7,
-      },
+      config: { temperature: 0.6 },
     });
 
-    const prediction = response.text || "Hoy es un gran día para seguir enfocándote en tu salud y bienestar.";
+    const prediction = response.text?.trim() || "Hoy es un gran día para cuidarte. Recuerda hidratarte bien y escuchar a tu cuerpo.";
 
     return NextResponse.json({ prediction });
   } catch (error: any) {

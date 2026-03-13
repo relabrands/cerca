@@ -95,6 +95,7 @@ function PatientContent() {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               phase,
+              currentDay,
               weightStart: fetchedPatient.weightStart,
               weightCurrent: fetchedPatient.weightCurrent,
               allergies: [

@@ -71,6 +71,7 @@ type TriageLevel = "red" | "yellow" | "green"
 
 interface PatientWithTriage extends Patient {
   triage: TriageLevel
+  triageReason?: string
   recentAlerts: number
   lastWeightDate?: string
   todayHydration: number
@@ -98,6 +99,8 @@ function DoctorContent() {
 
   // Patient detail / list
   const [selectedPatient, setSelectedPatient] = useState<PatientWithTriage | null>(null)
+  const [selectedPatientLogs, setSelectedPatientLogs] = useState<any[]>([])
+  const [loadingLogs, setLoadingLogs] = useState(false)
 
   // Add patient modal
   const [showAddModal, setShowAddModal] = useState(false)
@@ -167,18 +170,26 @@ function DoctorContent() {
 
             // Triage Logic
             let triage: TriageLevel = "green"
+            let triageReason = "Progreso estable"
             
             // RED: Panic alerts OR 0 hydration today
-            if (recentAlerts > 0 || (todayHydration === 0)) {
+            if (recentAlerts > 0) {
               triage = "red"
+              triageReason = "Alerta de pánico activada recientemente"
+            } else if (todayHydration === 0) {
+              triage = "red"
+              triageReason = "No se ha registrado consumo de agua hoy"
             } 
             // YELLOW: No weight log in > 7 days
             else if (lastWeightDate) {
               const daysSinceWeight = differenceInCalendarDays(parseISO(today), parseISO(lastWeightDate))
-              if (daysSinceWeight >= 7) triage = "yellow"
+              if (daysSinceWeight >= 7) {
+                triage = "yellow"
+                triageReason = "Sin registro de peso en más de 7 días"
+              }
             }
 
-            return { ...p, triage, recentAlerts, lastWeightDate, todayHydration }
+            return { ...p, triage, triageReason, recentAlerts, lastWeightDate, todayHydration }
           })
         )
 
@@ -224,6 +235,39 @@ function DoctorContent() {
       setLoadingSummary(false)
     }
   }
+
+  // ── Fetch patient logs ───────────────────────────────────────────────────
+  useEffect(() => {
+    const fetchSelectedPatientLogs = async () => {
+      if (!selectedPatient) {
+        setSelectedPatientLogs([])
+        return
+      }
+      setLoadingLogs(true)
+      try {
+        const tempLogs: any[] = []
+        
+        // Fetch last 7 days of daily logs using key logic from lib/store
+        for (let i = 0; i < 7; i++) {
+          const d = new Date()
+          // Correct date handling for DR timezone
+          d.setDate(d.getDate() - i)
+          const key = d.toISOString().split("T")[0] 
+          
+          const logSnap = await getDoc(doc(db, "patients", selectedPatient.id, "dailyLogs", key))
+          if (logSnap.exists()) {
+            tempLogs.push({ date: key, ...logSnap.data() })
+          }
+        }
+        setSelectedPatientLogs(tempLogs)
+      } catch (err) {
+        console.error("Error fetching logs:", err)
+      } finally {
+        setLoadingLogs(false)
+      }
+    }
+    fetchSelectedPatientLogs()
+  }, [selectedPatient])
 
   // ── Form helpers ─────────────────────────────────────────────────────────
   const updateForm = (key: keyof typeof form, value: unknown) =>
@@ -526,9 +570,8 @@ function DoctorContent() {
               }`}>
                 <AlertCircle className="h-4 w-4 shrink-0" />
                 <span>
-                  {selectedPatient.triage === "red" 
-                    ? "Atención prioritaria: Alertas de pánico recientes o falta de hidratación." 
-                    : "Seguimiento requerido: Sin registro de peso en más de 7 días."}
+                  {selectedPatient.triage === "red" ? "Prioritario: " : "Atención: "}
+                  {selectedPatient.triageReason}
                 </span>
               </div>
             )}
@@ -582,6 +625,68 @@ function DoctorContent() {
               )}
             </CardContent>
           </Card>
+
+          {/* Recent Activity Section */}
+          <div className="space-y-3">
+            <h3 className="text-sm font-bold text-foreground flex items-center gap-2 px-1">
+              <Clock className="h-4 w-4 text-primary" />
+              Actividad Reciente
+            </h3>
+            
+            {loadingLogs ? (
+              <div className="flex flex-col items-center justify-center py-8 gap-2 bg-muted/30 rounded-2xl border border-dashed">
+                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                <p className="text-xs text-muted-foreground uppercase tracking-widest">Cargando registros...</p>
+              </div>
+            ) : selectedPatientLogs.length === 0 ? (
+              <div className="bg-muted/30 rounded-2xl border border-dashed p-8 text-center">
+                <p className="text-sm text-muted-foreground uppercase tracking-wider">No hay registros esta semana</p>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {selectedPatientLogs.map((log) => (
+                  <Card key={log.date} className="border-0 shadow-sm overflow-hidden bg-white/50 dark:bg-black/20">
+                    <CardContent className="p-3">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">
+                          {log.date}
+                        </span>
+                        <div className="flex gap-2">
+                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                            (log.hydration_ml || 0) >= 1500 ? "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-200" : "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-200"
+                          }`}>
+                            {log.hydration_ml || 0}ml Agua
+                          </span>
+                          <span className="px-2 py-0.5 rounded-full bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-200 text-[10px] font-bold">
+                            {log.protein_g || 0}g Prot.
+                          </span>
+                        </div>
+                      </div>
+                      
+                      {log.food_logs && log.food_logs.length > 0 ? (
+                        <div className="space-y-1.5 border-t border-muted-foreground/10 pt-2">
+                          {log.food_logs.map((food: any, idx: number) => (
+                            <div key={idx} className="flex items-start gap-2">
+                              <div className="h-1.5 w-1.5 rounded-full bg-primary/40 mt-1.5 flex-shrink-0" />
+                              <div className="min-w-0 flex-1">
+                                <p className="text-xs font-semibold text-foreground leading-snug">{food.description}</p>
+                                {food.symptoms && (
+                                  <p className="text-[10px] text-red-500 italic mt-0.5">⚠️ {food.symptoms}</p>
+                                )}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="text-[10px] text-muted-foreground italic border-t border-muted-foreground/10 pt-2">Sin registro de comidas</p>
+                      )}
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            )}
+          </div>
+
           {/* Day counter */}
           <Card className="border-0 shadow-lg">
             <CardContent className="p-5">

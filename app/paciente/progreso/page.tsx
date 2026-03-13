@@ -17,7 +17,8 @@ import {
   ResponsiveContainer,
   Tooltip,
 } from "recharts"
-import { getDaysSinceProcedure, type Patient } from "@/lib/store"
+import { getDaysSinceProcedure, type Patient, getTodayKeyDR } from "@/lib/store"
+import { differenceInCalendarDays, parseISO } from "date-fns"
 import { onAuthStateChanged } from "firebase/auth"
 import { doc, getDoc, setDoc, collection, query, where, getDocs, orderBy } from "firebase/firestore"
 import { auth, db } from "@/lib/firebase"
@@ -116,8 +117,8 @@ export default function ProgresoPage() {
       // If no history yet, seed with the initial weight
       if (entries.length === 0 && p.weightStart) {
         entries.push({
-          date: p.procedureDate || new Date().toISOString().slice(0, 10),
-          dateLabel: formatDateLabel(p.procedureDate || new Date().toISOString().slice(0, 10)),
+          date: p.procedureDate || getTodayKeyDR(),
+          dateLabel: formatDateLabel(p.procedureDate || getTodayKeyDR()),
           weight: p.weightStart,
         })
       }
@@ -128,13 +129,15 @@ export default function ProgresoPage() {
   }
 
   // ─── Should show weigh-in prompt? ─────────────────────────────────────────
-  // Shows every 7 days (weekly). Uses the last entry's date vs. today.
+  // Shows every 7 days (weekly). Uses the last entry's date vs. today in DR time.
   const shouldShowWeighInPrompt = (() => {
     if (!patient) return false
-    const today = new Date()
     if (weightHistory.length === 0) return true
-    const lastEntry = new Date(weightHistory[weightHistory.length - 1].date + "T12:00:00")
-    const daysSinceLast = Math.floor((today.getTime() - lastEntry.getTime()) / (1000 * 60 * 60 * 24))
+    
+    const todayStr = getTodayKeyDR()
+    const lastEntryStr = weightHistory[weightHistory.length - 1].date
+    const daysSinceLast = differenceInCalendarDays(parseISO(todayStr), parseISO(lastEntryStr))
+    
     return daysSinceLast >= 7
   })()
 
@@ -147,7 +150,7 @@ export default function ProgresoPage() {
 
     setSavingWeight(true)
     try {
-      const today = new Date().toISOString().slice(0, 10)
+      const today = getTodayKeyDR()
       const logRef = doc(db, "patients", p.id, "weightLogs", today)
       await setDoc(logRef, { date: today, weight: w })
 

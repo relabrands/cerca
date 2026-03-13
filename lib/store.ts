@@ -1,5 +1,5 @@
-// Saciety Hub — Shared in-memory store (replace with Firestore in production)
 // This simulates multi-role data: SuperAdmin > Doctor > Patient
+import { differenceInCalendarDays, parseISO } from "date-fns"
 
 export type BalloonType =
   | "Orbera (6 meses)"
@@ -288,14 +288,28 @@ export const patients: Patient[] = [
   },
 ]
 
-// ---------------------------------------------------------------------------
 // Helper utils
 // ---------------------------------------------------------------------------
 
+export function getTodayKeyDR(): string {
+  // Returns YYYY-MM-DD in America/Santo_Domingo timezone
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Santo_Domingo",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date())
+}
+
 export function getDaysSinceProcedure(procedureDate: string): number {
-  const start = new Date(procedureDate)
-  const now = new Date()
-  return Math.max(0, Math.floor((now.getTime() - start.getTime()) / (1000 * 60 * 60 * 24)))
+  if (!procedureDate) return 1
+  const todayStr = getTodayKeyDR()
+  const start = parseISO(procedureDate)
+  const today = parseISO(todayStr)
+
+  // differenceInCalendarDays(Mar 13, Mar 12) = 1
+  // If Mar 12 is Day 1, then Mar 13 is Day 2 (diff + 1)
+  return Math.max(0, differenceInCalendarDays(today, start) + 1)
 }
 
 export function getPatientPhase(day: number): { phase: PatientPhase; label: string } {

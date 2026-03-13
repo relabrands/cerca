@@ -7,7 +7,7 @@ import { BottomNav } from "@/components/bottom-nav"
 import { PanicButton } from "@/components/panic-button"
 import { Sparkles, Clock, ChefHat, Loader2, Check, Utensils, ShoppingBag, Package, AlertTriangle, X } from "lucide-react"
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute"
-import { type Patient, getDaysSinceProcedure, getPatientPhase } from "@/lib/store"
+import { type Patient, getDaysSinceProcedure, getPatientPhase, getTodayKeyDR } from "@/lib/store"
 import { onAuthStateChanged } from "firebase/auth"
 import { doc, getDoc, setDoc, collection, query, where, getDocs } from "firebase/firestore"
 import { auth, db } from "@/lib/firebase"
@@ -110,10 +110,6 @@ export default function NutricionPage() {
   const [showTypeModal, setShowTypeModal] = useState(false)
   const [selectedType, setSelectedType] = useState<RecipeType>(null)
 
-  const todayKey = () => {
-    const d = new Date()
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`
-  }
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
@@ -149,7 +145,7 @@ export default function NutricionPage() {
         if (fetchedPatient) {
           setPatient(fetchedPatient)
           // Load cached recipe for today from Firestore
-          const logRef = doc(db, "patients", fetchedPatient.id, "dailyLogs", todayKey())
+          const logRef = doc(db, "patients", fetchedPatient.id, "dailyLogs", getTodayKeyDR())
           const logSnap = await getDoc(logRef)
           if (logSnap.exists() && logSnap.data().aiRecipe) {
             setGeneratedRecipe(logSnap.data().aiRecipe)
@@ -196,7 +192,7 @@ export default function NutricionPage() {
         setGeneratedRecipe(fullRecipe)
 
         // Persist in Firestore so it survives page refresh
-        const logRef = doc(db, "patients", patient.id, "dailyLogs", todayKey())
+        const logRef = doc(db, "patients", patient.id, "dailyLogs", getTodayKeyDR())
         await setDoc(logRef, { aiRecipe: fullRecipe }, { merge: true })
       }
     } catch (err) {

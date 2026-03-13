@@ -11,11 +11,10 @@ import { ProgressRing } from "@/components/progress-ring"
 import { BottomNav } from "@/components/bottom-nav"
 import { PanicButton } from "@/components/panic-button"
 import { Brain, Droplets, Sparkles, Calendar, X, Check, UtensilsCrossed, Loader2 } from "lucide-react"
-import { getDaysSinceProcedure, getPatientPhase, type Patient } from "@/lib/store"
+import { getDaysSinceProcedure, getPatientPhase, getTodayKeyDR, type Patient } from "@/lib/store"
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute"
 import { Target } from "lucide-react"
 
-const todayKey = () => new Date().toISOString().slice(0, 10) // "2026-03-12"
 
 function PatientContent() {
   const [patient, setPatient] = useState<Patient | null>(null)
@@ -74,7 +73,7 @@ function PatientContent() {
         patientRef.current = fetchedPatient
 
         // Load today's daily log from Firestore
-        const logRef = doc(db, "patients", fetchedPatient.id, "dailyLogs", todayKey())
+        const logRef = doc(db, "patients", fetchedPatient.id, "dailyLogs", getTodayKeyDR())
         const logSnap = await getDoc(logRef)
         if (logSnap.exists()) {
           const data = logSnap.data()
@@ -111,7 +110,7 @@ function PatientContent() {
                 // Cache in Firestore so it doesn't regenerate on every visit today
                 const p = patientRef.current
                 if (p) {
-                  const logRef = doc(db, "patients", p.id, "dailyLogs", todayKey())
+                  const logRef = doc(db, "patients", p.id, "dailyLogs", getTodayKeyDR())
                   await setDoc(logRef, { prediction: data.prediction }, { merge: true })
                 }
               }
@@ -133,7 +132,7 @@ function PatientContent() {
   const persistLog = async (newHydration: number, newProtein: number) => {
     const p = patientRef.current
     if (!p) return
-    const logRef = doc(db, "patients", p.id, "dailyLogs", todayKey())
+    const logRef = doc(db, "patients", p.id, "dailyLogs", getTodayKeyDR())
     await setDoc(logRef, { hydration_ml: newHydration, protein_g: newProtein, updatedAt: new Date().toISOString() }, { merge: true })
   }
 

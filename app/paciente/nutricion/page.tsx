@@ -9,7 +9,7 @@ import { Sparkles, Clock, ChefHat, Loader2, Check, Utensils, ShoppingBag, Packag
 import { ProtectedRoute } from "@/components/auth/ProtectedRoute"
 import { type Patient, getDaysSinceProcedure, getPatientPhase } from "@/lib/store"
 import { onAuthStateChanged } from "firebase/auth"
-import { doc, getDoc, collection, query, where, getDocs } from "firebase/firestore"
+import { doc, getDoc, setDoc, collection, query, where, getDocs } from "firebase/firestore"
 import { auth, db } from "@/lib/firebase"
 
 interface Recipe {
@@ -110,6 +110,11 @@ export default function NutricionPage() {
   const [showTypeModal, setShowTypeModal] = useState(false)
   const [selectedType, setSelectedType] = useState<RecipeType>(null)
 
+  const todayKey = () => {
+    const d = new Date()
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`
+  }
+
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       if (!user) {
@@ -143,6 +148,12 @@ export default function NutricionPage() {
 
         if (fetchedPatient) {
           setPatient(fetchedPatient)
+          // Load cached recipe for today from Firestore
+          const logRef = doc(db, "patients", fetchedPatient.id, "dailyLogs", todayKey())
+          const logSnap = await getDoc(logRef)
+          if (logSnap.exists() && logSnap.data().aiRecipe) {
+            setGeneratedRecipe(logSnap.data().aiRecipe)
+          }
         } else {
           setError("No se encontraron tus datos de paciente.")
         }
@@ -181,7 +192,12 @@ export default function NutricionPage() {
       })
       const data = await res.json()
       if (data.recipe) {
-        setGeneratedRecipe({ ...data.recipe, id: 999, type: selectedType })
+        const fullRecipe = { ...data.recipe, id: 999, type: selectedType }
+        setGeneratedRecipe(fullRecipe)
+
+        // Persist in Firestore so it survives page refresh
+        const logRef = doc(db, "patients", patient.id, "dailyLogs", todayKey())
+        await setDoc(logRef, { aiRecipe: fullRecipe }, { merge: true })
       }
     } catch (err) {
       console.error("Error generando receta:", err)

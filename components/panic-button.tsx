@@ -1,22 +1,20 @@
 "use client"
 
-import { useState, useEffect } from "react"
-import { HeartPulse, X, Send } from "lucide-react"
+import { useState, useEffect, useRef } from "react"
+import { HeartPulse, X, Send, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { cn } from "@/lib/utils"
-// Need firebase auth to identify patient
 import { onAuthStateChanged } from "firebase/auth"
 import { doc, getDoc, collection, query, where, getDocs } from "firebase/firestore"
 import { auth, db } from "@/lib/firebase"
-import { type Patient } from "@/lib/store"
-import { toast } from "sonner"
+import { type Patient, getDaysSinceProcedure, getPatientPhase } from "@/lib/store"
 
 const quickTags = [
   { label: "Náuseas", emoji: "🤢" },
   { label: "Ansiedad", emoji: "😰" },
   { label: "Reflujo", emoji: "🔥" },
-  { label: "Dolor", emoji: "😣" },
+  { label: "Dolor intenso", emoji: "😣" },
 ]
 
 interface Message {
@@ -25,113 +23,103 @@ interface Message {
   isUser: boolean
 }
 
+const DISCLAIMER = "⚠️ Esta función está en beta. La IA puede cometer errores — siempre sigue las indicaciones de tu médico."
+
 export function PanicButton() {
   const [patient, setPatient] = useState<Patient | null>(null)
   const [isOpen, setIsOpen] = useState(false)
-  const [isSending, setIsSending] = useState(false)
+  const [isThinking, setIsThinking] = useState(false)
   const [messages, setMessages] = useState<Message[]>([
-    {
-      id: 1,
-      text: "¿Cómo te sientes? Cuéntame tu síntoma para ayudarte a calmarte.",
-      isUser: false,
-    },
+    { id: 1, text: "¿Cómo te sientes? Cuéntame tu síntoma para ayudarte.", isUser: false },
   ])
   const [input, setInput] = useState("")
+  const messagesEndRef = useRef<HTMLDivElement>(null)
 
+  // Load patient context when modal opens
   useEffect(() => {
-    // Only fetch patient context once when opened
-    if (!isOpen) return;
+    if (!isOpen) return
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       if (!user) return
       try {
-        let fetchedPatient = null
+        let fetchedPatient: Patient | null = null
         const userDoc = await getDoc(doc(db, "users", user.uid))
-        if (userDoc.exists() && userDoc.data().entityId) {
-          const pDoc = await getDoc(doc(db, "patients", userDoc.data().entityId))
+        const entityId = userDoc.exists() ? userDoc.data().entityId : null
+        if (entityId) {
+          const pDoc = await getDoc(doc(db, "patients", entityId))
           if (pDoc.exists()) fetchedPatient = { id: pDoc.id, ...pDoc.data() } as Patient
         }
         if (!fetchedPatient && user.email) {
           const q = query(collection(db, "patients"), where("email", "==", user.email))
-          const sq = await getDocs(q)
-          if (!sq.empty) fetchedPatient = { id: sq.docs[0].id, ...sq.docs[0].data() } as Patient
+          const snap = await getDocs(q)
+          if (!snap.empty) fetchedPatient = { id: snap.docs[0].id, ...snap.docs[0].data() } as Patient
         }
         setPatient(fetchedPatient)
-      } catch (err) {
-        console.error("Error fetching patient for panic button", err)
-      }
+      } catch {}
     })
     return () => unsubscribe()
   }, [isOpen])
 
-  const triggerPanicDb = async (reason: string) => {
-    if (!patient) return;
-    setIsSending(true)
+  // Scroll to bottom on new messages
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
+  }, [messages, isThinking])
+
+  const getAIReply = async (allMessages: Message[]) => {
+    setIsThinking(true)
     try {
-      await fetch("/api/panic", {
+      const currentDay = patient ? getDaysSinceProcedure(patient.procedureDate) : 1
+      const { phase } = patient ? getPatientPhase(currentDay) : { phase: 1 }
+
+      // Notify doctor (fire-and-forget)
+      if (patient) {
+        fetch("/api/panic", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            patientId: patient.id,
+            patientName: patient.name,
+            doctorId: patient.doctorId,
+            reason: allMessages[allMessages.length - 1]?.text,
+          }),
+        }).catch(() => {})
+      }
+
+      const res = await fetch("/api/ai/support", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          patientId: patient.id,
-          patientName: patient.name,
-          doctorId: patient.doctorId,
-          reason
-        })
-      });
-    } catch(err) {
-      console.error(err)
+          messages: allMessages,
+          patientPhase: phase,
+          patientDay: patient ? getDaysSinceProcedure(patient.procedureDate) : 1,
+          allergies: [
+            ...(patient?.allergiesFoods || []),
+            ...(patient?.allergiesMedications || []),
+          ],
+        }),
+      })
+      const data = await res.json()
+      const reply = data.reply || "Estamos aquí contigo. Si los síntomas empeoran, ve a urgencias más cercanas."
+      const aiMsg: Message = { id: allMessages.length + 1, text: reply, isUser: false }
+      setMessages(prev => [...prev, aiMsg])
+    } catch {
+      const aiMsg: Message = {
+        id: allMessages.length + 1,
+        text: "Lo siento, hubo un problema al generar respuesta. Si es una emergencia, ve a urgencias inmediatamente.",
+        isUser: false,
+      }
+      setMessages(prev => [...prev, aiMsg])
     } finally {
-      setIsSending(false)
+      setIsThinking(false)
     }
   }
 
-  const handleTagClick = async (tag: string) => {
-    const userMessage: Message = {
-      id: messages.length + 1,
-      text: tag,
-      isUser: true,
-    }
-    
-    setMessages(prev => [...prev, userMessage])
-    await triggerPanicDb(tag);
-
-    // Simulated response
-    const responses: Record<string, string> = {
-      "Náuseas": "Entiendo que te sientes con náuseas. Esto es muy común en las primeras semanas. Hemos avisado a tu doctor. Te recomiendo: 1) Bebe pequeños sorbos de agua fría cada 15 minutos. 2) Respira profundamente. 3) Evita movimientos bruscos.",
-      "Ansiedad": "Es completamente normal sentir ansiedad. Hemos notificado al doctor. Intenta respirar profundamente 5 veces. Si necesitas hablar con alguien, tu centro médico está disponible para ti.",
-      "Reflujo": "El reflujo puede ser incómodo. Hemos registrado tu alerta. Te sugiero: 1) No te acuestes inmediatamente después de comer. 2) Eleva la cabecera de tu cama. 3) Evita alimentos ácidos o picantes.",
-      "Dolor": "Lamento que sientas dolor. Hemos enviado inmediatamente una alerta a tu médico asignado. Si el dolor es intenso, por favor dirígete a urgencias.",
-    }
-
-    const aiMessage: Message = {
-      id: messages.length + 2,
-      text: responses[tag] || "Gracias por compartir cómo te sientes. Hemos notificado a tu doctor.",
-      isUser: false,
-    }
-
-    setMessages(prev => [...prev, aiMessage])
-  }
-
-  const handleSend = async () => {
-    if (!input.trim()) return
-
-    const userMessage: Message = {
-      id: messages.length + 1,
-      text: input,
-      isUser: true,
-    }
-    
-    setMessages(prev => [...prev, userMessage])
+  const sendMessage = async (text: string) => {
+    if (!text.trim()) return
+    const userMsg: Message = { id: messages.length + 1, text, isUser: true }
+    const updated = [...messages, userMsg]
+    setMessages(updated)
     setInput("")
-    
-    await triggerPanicDb(input);
-
-    const aiMessage: Message = {
-      id: messages.length + 2,
-      text: "Hemos registrado tu mensaje de alerta y lo enviaremos a tu doctor. Si es una emergencia grave, por favor acude al hospital más cercano.",
-      isUser: false,
-    }
-
-    setMessages(prev => [...prev, aiMessage])
+    await getAIReply(updated)
   }
 
   return (
@@ -161,15 +149,10 @@ export function PanicButton() {
                 </div>
                 <div>
                   <h2 className="font-semibold text-foreground">Asistente de Apoyo</h2>
-                  <p className="text-xs text-muted-foreground">Estamos aquí para ayudarte</p>
+                  <p className="text-xs text-muted-foreground">Tu doctor ha sido notificado</p>
                 </div>
               </div>
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => setIsOpen(false)}
-                className="rounded-full"
-              >
+              <Button variant="ghost" size="icon" onClick={() => setIsOpen(false)} className="rounded-full">
                 <X className="h-5 w-5" />
               </Button>
             </div>
@@ -179,8 +162,9 @@ export function PanicButton() {
               {quickTags.map((tag) => (
                 <button
                   key={tag.label}
-                  onClick={() => handleTagClick(tag.label)}
-                  className="flex shrink-0 items-center gap-1.5 rounded-full bg-secondary px-3 py-1.5 text-sm font-medium text-secondary-foreground transition-colors hover:bg-secondary/80"
+                  onClick={() => sendMessage(tag.label)}
+                  disabled={isThinking}
+                  className="flex shrink-0 items-center gap-1.5 rounded-full bg-secondary px-3 py-1.5 text-sm font-medium text-secondary-foreground transition-colors hover:bg-secondary/80 disabled:opacity-50"
                 >
                   <span>{tag.emoji}</span>
                   <span>{tag.label}</span>
@@ -203,6 +187,23 @@ export function PanicButton() {
                   {message.text}
                 </div>
               ))}
+
+              {/* Thinking indicator */}
+              {isThinking && (
+                <div className="flex max-w-[85%] items-center gap-2 rounded-2xl bg-muted px-4 py-3 text-sm text-muted-foreground">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <span>Analizando...</span>
+                </div>
+              )}
+
+              <div ref={messagesEndRef} />
+            </div>
+
+            {/* Beta Disclaimer */}
+            <div className="px-4 pb-1">
+              <p className="text-center text-[10px] text-muted-foreground leading-tight">
+                {DISCLAIMER}
+              </p>
             </div>
 
             {/* Input */}
@@ -213,10 +214,11 @@ export function PanicButton() {
                   onChange={(e) => setInput(e.target.value)}
                   placeholder="Escribe cómo te sientes..."
                   className="flex-1"
-                  onKeyDown={(e) => e.key === "Enter" && handleSend()}
+                  disabled={isThinking}
+                  onKeyDown={(e) => e.key === "Enter" && !isThinking && sendMessage(input)}
                 />
-                <Button onClick={handleSend} size="icon" className="shrink-0">
-                  <Send className="h-4 w-4" />
+                <Button onClick={() => sendMessage(input)} size="icon" className="shrink-0" disabled={isThinking || !input.trim()}>
+                  {isThinking ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
                 </Button>
               </div>
             </div>

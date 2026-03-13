@@ -40,6 +40,8 @@ service cloud.firestore {
     match /doctors/{doctorId} {
       allow read, write: if isAdmin();
       allow read: if isDoctor() || isPatient();
+      // Allow doctor to update their own basic profile info (like balloon types)
+      allow update: if isDoctor() && getUserData().entityId == doctorId;
     }
 
     // ----------- patients collection -----------
